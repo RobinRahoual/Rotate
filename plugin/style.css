@@ -1,0 +1,24 @@
+body {
+  padding: 8px;
+  color: var(--uxp-host-text-color);
+  font-size: var(--uxp-host-font-size);
+}
+.hint {
+  margin: 0 0 8px;
+}
+.actions {
+  display: flex;
+  flex-direction: column;
+}
+.actions sp-button {
+  margin-bottom: 6px;
+}
+.log {
+  margin-top: 8px;
+  font-family: monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+.log .ok { color: #6fcf6f; }
+.log .warn { color: #e6b450; }
+.log .error { color: #ff6b6b; }
