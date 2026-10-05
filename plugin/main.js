@@ -1,8 +1,20 @@
 "use strict";
 
 const { rotateSelection } = require("./src/premiere.js");
+const settings = require("./src/settings.js");
+
+// localStorage peut être indisponible : les préférences restent alors en mémoire.
+const memory = new Map();
+const storage = (() => {
+  try {
+    return window.localStorage || null;
+  } catch (e) {
+    return null;
+  }
+})() || { getItem: (k) => (memory.has(k) ? memory.get(k) : null), setItem: (k, v) => memory.set(k, String(v)) };
 
 let busy = false;
+let defaultRotation = settings.getDefaultRotation(storage);
 
 function log(message, level = "info") {
   const line = document.createElement("div");
@@ -27,6 +39,23 @@ async function onRotate(degrees) {
   }
 }
 
+function renderDefault() {
+  document.getElementById("rotate-default").textContent = `Tourner en vertical (${settings.rotationLabel(defaultRotation)})`;
+  document.querySelectorAll("#default-choice sp-radio").forEach((radio) => {
+    if (Number(radio.getAttribute("value")) === defaultRotation) radio.setAttribute("checked", "");
+    else radio.removeAttribute("checked");
+  });
+}
+
+document.getElementById("rotate-default").addEventListener("click", () => onRotate(defaultRotation));
+
+document.getElementById("default-choice").addEventListener("change", (event) => {
+  defaultRotation = settings.setDefaultRotation(storage, Number(event.target.value));
+  renderDefault();
+});
+
 document.querySelectorAll("[data-rotation]").forEach((button) => {
   button.addEventListener("click", () => onRotate(Number(button.getAttribute("data-rotation"))));
 });
+
+renderDefault();

@@ -6,6 +6,16 @@ body {
 .hint {
   margin: 0 0 8px;
 }
+.main {
+  width: 100%;
+  margin-bottom: 10px;
+}
+#default-choice {
+  margin-bottom: 8px;
+}
+sp-divider {
+  margin: 8px 0;
+}
 .actions {
   display: flex;
   flex-direction: column;

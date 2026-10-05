@@ -6,12 +6,26 @@
   </head>
   <body>
     <p class="hint">Sélectionne des rushs (ou des chutiers) dans le panneau Projet, puis :</p>
+
+    <sp-button id="rotate-default" class="main" variant="cta">Tourner en vertical</sp-button>
+
+    <sp-radio-group id="default-choice" column>
+      <sp-label slot="label">Sens par défaut</sp-label>
+      <sp-radio value="270">↺ -90° (anti-horaire)</sp-radio>
+      <sp-radio value="90">↻ +90° (horaire)</sp-radio>
+      <sp-radio value="180">180°</sp-radio>
+    </sp-radio-group>
+
+    <sp-divider size="small"></sp-divider>
+
+    <p class="hint">Ponctuellement, un autre sens :</p>
     <div class="actions">
-      <sp-button data-rotation="90">Vertical ↻ 90°</sp-button>
-      <sp-button data-rotation="270">Vertical ↺ 90°</sp-button>
+      <sp-button data-rotation="270" variant="secondary">↺ -90°</sp-button>
+      <sp-button data-rotation="90" variant="secondary">↻ +90°</sp-button>
       <sp-button data-rotation="180" variant="secondary">180°</sp-button>
       <sp-button data-rotation="0" variant="secondary">Horizontal d'origine</sp-button>
     </div>
+
     <div id="log" class="log"></div>
     <script src="main.js"></script>
   </body>

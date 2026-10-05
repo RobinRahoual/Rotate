@@ -33,11 +33,19 @@ Prérequis : **Premiere Pro 25.6 ou plus récent** et l'application **UXP Develo
 
 1. Dans le panneau **Projet**, sélectionne un ou plusieurs rushs **ou des chutiers entiers**
    (les sous-chutiers sont parcourus aussi).
-2. Clique sur :
-   - **Vertical ↻ 90°** (sens horaire) ou **Vertical ↺ 90°** (anti-horaire) selon le sens dans lequel tu
-     tenais la caméra — fais un essai sur un rush la première fois ;
-   - **180°** pour une image à l'envers ;
-   - **Horizontal d'origine** pour annuler.
+2. Clique sur **Tourner en vertical** : la rotation se fait dans ton **sens par défaut**.
+
+### Sens par défaut
+
+Sous le bouton principal, choisis une fois pour toutes le sens qui correspond à ta façon de tenir la
+caméra : **↺ -90°** (anti-horaire, réglage initial), **↻ +90°** (horaire) ou **180°**. Le choix est
+mémorisé : il est conservé quand tu fermes le panneau ou Premiere.
+
+### Autres actions
+
+Les boutons du bas servent ponctuellement :
+- **↺ -90°**, **↻ +90°** ou **180°** pour un rush filmé dans un autre sens que d'habitude ;
+- **Horizontal d'origine** pour annuler.
 
 Les rotations sont *absolues* : recliquer sur le même bouton ne tourne pas une deuxième fois.
 
@@ -69,5 +77,6 @@ plugin/
   index.html, main.js  panneau (UI minimale pour l'instant)
   src/mp4rotation.js   lecture/écriture de la matrice de rotation (indépendant de Premiere)
   src/premiere.js      sélection du panneau Projet, chutiers, rafraîchissement des clips
+  src/settings.js      préférences (sens de rotation par défaut)
   test/                tests Node + ffmpeg
 ```
