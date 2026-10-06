@@ -1,7 +1,7 @@
 {
   "id": "fr.robinrahoual.rotate",
   "name": "Rotate",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "main": "index.html",
   "manifestVersion": 5,
   "host": {
@@ -12,6 +12,12 @@
     "localFileSystem": "fullAccess",
     "ipc": {
       "enablePluginCommunication": true
+    },
+    "launchProcess": {
+      "schemes": [
+        "https"
+      ],
+      "extensions": []
     }
   },
   "entrypoints": [

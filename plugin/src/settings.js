@@ -16,6 +16,9 @@ const KEYS = {
   autoProxy: "rotate.autoProxy",
   history: "rotate.history",
   pendingProxies: "rotate.pendingProxies",
+  createdProxies: "rotate.createdProxies",
+  shortcuts: "rotate.shortcuts",
+  endSound: "rotate.endSound",
 };
 
 // Sens proposés comme rotation par défaut (degrés, sens horaire). 270 = -90°.

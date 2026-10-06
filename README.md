@@ -1,5 +1,8 @@
 # Rotate — plugin Premiere Pro
 
+Plugin gratuit créé par **Robin Rahoual** — suis-moi sur Instagram : [@robin.rahoual](https://www.instagram.com/robin.rahoual/)
+(bouton **Instagram** en bas du panneau).
+
 Passe tes rushs filmés à la verticale (Sony A7 III, etc.) **en vertical directement dans Premiere Pro**,
 sans ré-export, sans doublon de fichier et sans perte de qualité.
 
@@ -94,12 +97,30 @@ modifié entre-temps par une autre opération n'est pas touché.
 
 Lancées depuis le menu, ces actions ouvrent le panneau Rotate pour que tu suives leur avancement.
 
-### Raccourci clavier
+### Raccourcis clavier
 
-Premiere ne permet pas encore aux plugins UXP de déclarer des raccourcis clavier (limitation d'Adobe,
-indiquée dans leur documentation). Essaie quand même *Modifier > Raccourcis clavier* (ou *Premiere Pro >
-Raccourcis clavier* sur Mac) et cherche « Rotate » : si les commandes du menu y apparaissent, tu peux leur
-donner la touche de ton choix. Dès qu'Adobe l'autorisera, le plugin proposera un raccourci configurable.
+Quand le panneau Rotate est sélectionné (clique dedans), une touche suffit :
+
+| Touche | Action |
+| --- | --- |
+| **V** | Tourner la sélection (sens par défaut) |
+| **H** | Remettre à l'horizontale |
+| **U** | Annuler la dernière opération |
+| **P** | Créer les proxys de la sélection |
+| **Échap** | Arrêter l'opération en cours |
+
+Pour changer une touche : section *Raccourcis clavier*, clique sur la touche puis appuie sur la nouvelle
+(lettre ou chiffre ; Retour arrière pour n'en mettre aucune). Une touche ne sert qu'à une action.
+
+Premiere ne permet pas encore aux plugins de déclarer des raccourcis **globaux** (actifs partout). Essaie
+quand même *Modifier > Raccourcis clavier* et cherche « Rotate » : si les commandes du menu y apparaissent,
+tu peux leur donner un raccourci global.
+
+### Signal de fin
+
+Quand une opération dure plus de 8 secondes, ou quand un lot de proxys est prêt, le panneau passe au
+premier plan, le bilan clignote et un petit son est joué (désactivable : *Jouer un son à la fin*).
+*Tester le signal* permet de l'essayer.
 
 ### Garder le panneau sous la main
 
@@ -143,6 +164,13 @@ identique à la source · OK · clic droit → **Exporter le préréglage…**. 
 
 Les proxys sont rangés dans un dossier `Proxies` à côté des rushs (`C0001_Proxy_Vertical.mov`). Ce sont des
 fichiers légers, que tu peux supprimer à tout moment sans risque pour tes rushs.
+
+### Nettoyer les proxys
+
+**Analyser et nettoyer les proxys** affiche la place occupée par les proxys Rotate et liste ceux qui ne sont
+attachés à aucun clip du projet ouvert (anciennes versions, rushs retirés du projet…). Tu coches ceux à
+supprimer ; ceux qui sont utilisés ou en cours d'encodage ne sont jamais proposés. Attention : un proxy
+inutilisé dans ce projet peut servir dans un autre projet (il faudrait alors le recréer).
 
 Si tu remets un rush à l'horizontale, son proxy vertical ne correspond plus : désactive les proxys ou
 recrée-les.
@@ -198,6 +226,9 @@ plugin/
   src/presets.js       création et vérification automatiques du préréglage Media Encoder vertical
   src/inflate.js       décompression gzip (certains préréglages Adobe sont compressés)
   src/compat.js        vérification de compatibilité avec la version de Premiere
+  src/shortcuts.js     raccourcis clavier du panneau
+  src/cleanup.js       analyse et suppression des proxys inutilisés
+  assets/done.mp4      son de fin (0,7 s)
   assets/calibration.mp4  vidéo de 1 s (4 Ko) pour l'encodage test du préréglage
   test/                tests Node + ffmpeg
 ```

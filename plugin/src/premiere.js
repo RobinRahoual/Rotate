@@ -192,6 +192,40 @@ async function findClipsByPaths(project, paths) {
   return found;
 }
 
+/* Tous les clips du projet avec leur fichier et leur proxy éventuel : [{ name, path, proxyPath }]. */
+async function listProjectMedia(project) {
+  const media = [];
+  async function visit(items) {
+    const clipItems = [];
+    const bins = [];
+    for (const item of items) {
+      if (item.type === ppro.ProjectItem.TYPE_BIN || item.type === ppro.ProjectItem.TYPE_ROOT) bins.push(item);
+      else if (item.type === ppro.ProjectItem.TYPE_CLIP) clipItems.push(item);
+    }
+    await mapLimit(clipItems, COLLECT_CONCURRENCY, async (item) => {
+      const clip = ppro.ClipProjectItem.cast(item);
+      if (!clip) return;
+      let path = "";
+      let proxyPath = "";
+      try {
+        path = await clip.getMediaFilePath();
+      } catch (e) {
+        path = "";
+      }
+      if (!path) return;
+      try {
+        proxyPath = (await clip.getProxyPath()) || "";
+      } catch (e) {
+        proxyPath = "";
+      }
+      media.push({ name: item.name, path, proxyPath });
+    });
+    for (const bin of bins) await visit(await ppro.FolderItem.cast(bin).getItems());
+  }
+  await visit([await project.getRootItem()]);
+  return media;
+}
+
 /* Met le clip hors ligne (libère le fichier côté Premiere, utile sous Windows). */
 function setOffline(project, clip) {
   project.lockedAccess(() => {
@@ -431,6 +465,7 @@ module.exports = {
   applyRotations,
   undoOperation,
   findClipsByPaths,
+  listProjectMedia,
   withFile,
   mapLimit,
   pause,

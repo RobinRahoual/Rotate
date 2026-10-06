@@ -53,6 +53,7 @@ function createProxyQueue(deps) {
   const log = deps.log || (() => {});
   const onChange = deps.onChange || (() => {});
   const onJobDone = deps.onJobDone || (() => {});
+  const onQueued = deps.onQueued || (() => {});
   const now = deps.now || (() => Date.now());
   const clipCache = new Map(); // chemin du rush -> ClipProjectItem
   let pending = (deps.load && deps.load()) || [];
@@ -241,6 +242,7 @@ function createProxyQueue(deps) {
           aspect: source.displayWidth / source.displayHeight,
           fps: source.fps,
         });
+        onQueued(proxyPath);
         queued++;
       } catch (e) {
         log(`${entry.name} : proxy non lancé - ${e && e.message ? e.message : e}`, "error");
@@ -265,6 +267,7 @@ function createProxyQueue(deps) {
     check,
     resume,
     pendingCount: () => pending.length,
+    pendingPaths: () => pending.map((p) => p.proxyPath),
     stop: stopPolling,
   };
 }

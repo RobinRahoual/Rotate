@@ -57,6 +57,9 @@
             <sp-action-button id="make-proxies">Créer les proxys de la sélection</sp-action-button>
           </div>
           <sp-checkbox id="opt-auto-proxy">Créer les proxys après chaque rotation</sp-checkbox>
+          <div class="row row-top">
+            <sp-action-button id="clean-proxies">Analyser et nettoyer les proxys</sp-action-button>
+          </div>
           <sp-body size="XS" class="muted label">Taille des proxys</sp-body>
           <sp-radio-group id="proxy-size">
             <sp-radio value="540x960">540×960</sp-radio>
@@ -71,6 +74,22 @@
         </div>
 
         <div class="section">
+          <sp-detail>RACCOURCIS CLAVIER</sp-detail>
+          <sp-body size="XS" class="muted">Actifs quand le panneau Rotate est sélectionné (clique dedans, puis appuie sur la touche). Échap arrête une opération en cours. Clique sur une touche pour la changer.</sp-body>
+          <div class="shortcut-row"><sp-body size="XS">Tourner (sens par défaut)</sp-body><sp-action-button data-shortcut="rotateDefault"></sp-action-button></div>
+          <div class="shortcut-row"><sp-body size="XS">Remettre à l'horizontale</sp-body><sp-action-button data-shortcut="rotateReset"></sp-action-button></div>
+          <div class="shortcut-row"><sp-body size="XS">Annuler la dernière opération</sp-body><sp-action-button data-shortcut="undo"></sp-action-button></div>
+          <div class="shortcut-row"><sp-body size="XS">Créer les proxys de la sélection</sp-body><sp-action-button data-shortcut="proxies"></sp-action-button></div>
+        </div>
+
+        <div class="section">
+          <sp-detail>SIGNAL DE FIN</sp-detail>
+          <sp-checkbox id="opt-end-sound">Jouer un son à la fin</sp-checkbox>
+          <sp-body size="XS" class="muted">Pour les opérations de plus de 8 s et quand les proxys sont prêts : le panneau passe au premier plan et le bilan clignote.</sp-body>
+          <div class="row row-top"><sp-action-button id="test-signal" quiet>Tester le signal</sp-action-button></div>
+        </div>
+
+        <div class="section">
           <div class="section-title">
             <sp-detail>JOURNAL</sp-detail>
             <sp-action-button id="clear-log" quiet>Effacer</sp-action-button>
@@ -78,7 +97,22 @@
           <div id="log" class="log"></div>
         </div>
       </div>
+
+      <div class="footer">
+        <sp-body size="XS" class="muted credit">Rotate · gratuit · par @robin.rahoual</sp-body>
+        <sp-action-button id="instagram" quiet>
+          <div slot="icon" class="ig-icon">
+            <svg viewBox="0 0 24 24" width="14" height="14">
+              <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" ry="5.5" fill="none" stroke="currentColor" stroke-width="2"></rect>
+              <circle cx="12" cy="12" r="4.3" fill="none" stroke="currentColor" stroke-width="2"></circle>
+              <circle cx="17.6" cy="6.4" r="1.3" fill="currentColor"></circle>
+            </svg>
+          </div>
+          Instagram
+        </sp-action-button>
+      </div>
     </div>
+    <video id="done-sound" class="sound" src="plugin:/assets/done.mp4" preload="auto"></video>
     <script src="main.js"></script>
   </body>
 </html>

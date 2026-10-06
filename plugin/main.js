@@ -11,6 +11,11 @@ const settings = require("./src/settings.js");
 const { createProxyQueue, waitForCompleteFile } = require("./src/proxies.js");
 const presets = require("./src/presets.js");
 const { checkCompatibility } = require("./src/compat.js");
+const shortcutKeys = require("./src/shortcuts.js");
+const cleanup = require("./src/cleanup.js");
+
+const INSTAGRAM_URL = "https://www.instagram.com/robin.rahoual/";
+const LONG_TASK_MS = 8000; // au-delà, signal de fin
 const os = require("os");
 
 const MAX_LOG_LINES = 300;
@@ -186,18 +191,52 @@ async function runTask(label, task) {
   cancelRequested = false;
   setBusy(true);
   status.start(label);
+  const started = Date.now();
   try {
     const result = (await task()) || { kind: "ok", title: "Terminé" };
     status.finish(result.kind, result.title, result.detail);
+    if (Date.now() - started > LONG_TASK_MS && result.kind !== "idle") signalEnd($("status"));
     return { ok: result.kind !== "error" && result.kind !== "warn", message: `${result.title}${result.detail ? ` - ${result.detail}` : ""}` };
   } catch (e) {
     const message = errorMessage(e);
     status.finish("error", "Échec", message);
     log(message, "error");
+    if (Date.now() - started > LONG_TASK_MS) signalEnd($("status"));
     return { ok: false, message };
   } finally {
     setBusy(false);
   }
+}
+
+/* ---------- Signal de fin : panneau au premier plan, bilan qui clignote, son ---------- */
+
+function flash(el) {
+  let n = 0;
+  const timer = setInterval(() => {
+    if (n % 2 === 0) el.classList.add("flash");
+    else el.classList.remove("flash");
+    if (++n >= 6) {
+      clearInterval(timer);
+      el.classList.remove("flash");
+    }
+  }, 250);
+}
+
+function playEndSound() {
+  try {
+    const sound = $("done-sound");
+    sound.currentTime = 0;
+    const playing = sound.play();
+    if (playing && playing.catch) playing.catch(() => {});
+  } catch (e) {
+    // lecture audio indisponible : le clignotement suffit
+  }
+}
+
+function signalEnd(el) {
+  showOwnPanel();
+  flash(el);
+  if (settings.getBool(storage, "endSound", true)) playEndSound();
 }
 
 /* ---------- Boîtes de dialogue ---------- */
@@ -250,12 +289,13 @@ async function confirmDialog(text, okLabel, cancelLabel = "Annuler") {
  * Aperçu avant validation : liste des rushs avec leur sens actuel, ceux à
  * tourner sont cochés. Renvoie les éléments cochés, ou null si abandon.
  */
-async function previewDialog(items, degrees) {
-  const todo = items.filter((i) => i.status === "todo");
-  const unchanged = items.filter((i) => i.status === "unchanged");
-  const errors = items.filter((i) => i.status === "error");
-  if (!todo.length) return items; // rien à tourner : pas besoin de demander
-
+/*
+ * Fenêtre de liste à cocher. options : {
+ *   intro, items: [{ label, value }] (tous cochés au départ),
+ *   lines: [{ text, className }] (lignes non cochables), okLabel(checkedValues), cancelLabel, size
+ * }. Renvoie les valeurs cochées, ou null si abandon.
+ */
+async function checklistDialog(options) {
   const answer = await showDialog((dialog) => {
     dialog.innerHTML = `
       <div class="preview">
@@ -263,61 +303,77 @@ async function previewDialog(items, degrees) {
         <sp-checkbox id="all" checked>Tout cocher</sp-checkbox>
         <div class="preview-list" id="list"></div>
         <footer>
-          <sp-button variant="secondary" id="no">Annuler</sp-button>
+          <sp-button variant="secondary" id="no"></sp-button>
           <sp-button variant="cta" id="yes"></sp-button>
         </footer>
       </div>`.trim();
-    const parts = [`${todo.length} rush(s) à tourner en ${settings.rotationLabel(degrees)}`];
-    if (unchanged.length) parts.push(`${unchanged.length} déjà dans ce sens`);
-    if (errors.length) parts.push(`${errors.length} illisible(s)`);
-    dialog.querySelector("#intro").textContent = parts.join(" · ");
+    dialog.querySelector("#intro").textContent = options.intro;
+    dialog.querySelector("#no").textContent = options.cancelLabel || "Annuler";
 
     const list = dialog.querySelector("#list");
     const boxes = [];
-    const itemOf = new Map();
-    for (const item of todo) {
+    const valueOf = new Map();
+    for (const item of options.items) {
       const box = document.createElement("sp-checkbox");
       box.setAttribute("checked", "");
-      box.textContent = `${item.entry.name}   ${settings.rotationLabel(item.previous)} → ${settings.rotationLabel(degrees)}`;
-      itemOf.set(box, item);
+      box.textContent = item.label;
+      valueOf.set(box, item.value);
       list.appendChild(box);
       boxes.push(box);
     }
-    for (const item of unchanged) {
-      const line = document.createElement("div");
-      line.className = "line muted";
-      line.textContent = `${item.entry.name}   déjà ${settings.rotationLabel(degrees)}`;
-      list.appendChild(line);
-    }
-    for (const item of errors) {
-      const line = document.createElement("div");
-      line.className = "line error";
-      line.textContent = `${item.entry.name}   ${item.error}`;
-      list.appendChild(line);
+    for (const line of options.lines || []) {
+      const el = document.createElement("div");
+      el.className = `line ${line.className || "muted"}`;
+      el.textContent = line.text;
+      list.appendChild(el);
     }
 
     const yes = dialog.querySelector("#yes");
     const isChecked = (b) => b.checked === true || (b.checked === undefined && b.hasAttribute("checked"));
+    const checkedValues = () => boxes.filter(isChecked).map((b) => valueOf.get(b));
     const update = () => {
-      const n = boxes.filter(isChecked).length;
-      yes.textContent = n ? `Tourner ${n} rush(s)` : "Rien de coché";
-      setDisabled(yes, n === 0);
+      const values = checkedValues();
+      yes.textContent = values.length ? options.okLabel(values) : "Rien de coché";
+      setDisabled(yes, values.length === 0);
     };
     boxes.forEach((b) => b.addEventListener("change", update));
     dialog.querySelector("#all").addEventListener("change", (e) => {
-      boxes.forEach((b) => {
-        b.checked = e.target.checked;
-        if (e.target.checked) b.setAttribute("checked", "");
-        else b.removeAttribute("checked");
-      });
+      boxes.forEach((b) => setChecked(b, e.target.checked));
       update();
     });
     update();
-    yes.addEventListener("click", () => dialog.close(boxes.filter(isChecked).map((b) => itemOf.get(b))));
+    yes.addEventListener("click", () => dialog.close(checkedValues()));
     dialog.querySelector("#no").addEventListener("click", () => dialog.close(null));
-  }, { width: 440, height: 440 });
+  }, options.size || { width: 440, height: 440 });
+  return Array.isArray(answer) ? answer : null;
+}
 
-  return Array.isArray(answer) ? [...answer, ...unchanged] : null;
+/*
+ * Aperçu avant validation : liste des rushs avec leur sens actuel, ceux à
+ * tourner sont cochés. Renvoie les éléments cochés, ou null si abandon.
+ */
+async function previewDialog(items, degrees) {
+  const todo = items.filter((i) => i.status === "todo");
+  const unchanged = items.filter((i) => i.status === "unchanged");
+  const errors = items.filter((i) => i.status === "error");
+  if (!todo.length) return items; // rien à tourner : pas besoin de demander
+
+  const parts = [`${todo.length} rush(s) à tourner en ${settings.rotationLabel(degrees)}`];
+  if (unchanged.length) parts.push(`${unchanged.length} déjà dans ce sens`);
+  if (errors.length) parts.push(`${errors.length} illisible(s)`);
+  const chosen = await checklistDialog({
+    intro: parts.join(" · "),
+    items: todo.map((item) => ({
+      label: `${item.entry.name}   ${settings.rotationLabel(item.previous)} → ${settings.rotationLabel(degrees)}`,
+      value: item,
+    })),
+    lines: [
+      ...unchanged.map((item) => ({ text: `${item.entry.name}   déjà ${settings.rotationLabel(degrees)}`, className: "muted" })),
+      ...errors.map((item) => ({ text: `${item.entry.name}   ${item.error}`, className: "error" })),
+    ],
+    okLabel: (values) => `Tourner ${values.length} rush(s)`,
+  });
+  return chosen ? [...chosen, ...unchanged] : null;
 }
 
 /* ---------- Historique / annulation ---------- */
@@ -444,10 +500,17 @@ const proxies = createProxyQueue({
     else proxyBatch.failed++;
     renderProxyBanner();
   },
+  // Registre des proxys créés, pour pouvoir les retrouver au nettoyage.
+  onQueued: (proxyPath) => {
+    const known = settings.getJSON(storage, "createdProxies", []);
+    known.push(proxyPath);
+    settings.setJSON(storage, "createdProxies", known.slice(-5000));
+  },
 });
 
 // Suivi des proxys en cours : X/Y prêts, puis bilan.
 const proxyBatch = { total: 0, done: 0, failed: 0 };
+let proxiesRunning = false;
 
 function renderProxyBanner() {
   const pending = proxies.pendingCount();
@@ -463,6 +526,7 @@ function renderProxyBanner() {
   const finished = proxyBatch.done + proxyBatch.failed;
   $("proxy-bar").setAttribute("value", String(Math.round((finished / proxyBatch.total) * 100)));
   if (pending) {
+    proxiesRunning = true;
     banner.className = "status proxy";
     show($("proxy-bar"), true);
     $("proxy-banner-text").textContent = `◐ Proxys : ${finished}/${proxyBatch.total} prêts · Media Encoder travaille en arrière-plan`;
@@ -472,6 +536,11 @@ function renderProxyBanner() {
     $("proxy-banner-text").textContent = proxyBatch.failed
       ? `⚠ Proxys : ${proxyBatch.done} attaché(s), ${proxyBatch.failed} problème(s) (voir le journal)`
       : `✓ ${proxyBatch.done} proxy(s) vertical(aux) attaché(s) · active les proxys dans le moniteur`;
+    // Fin du lot de proxys : on prévient (ils peuvent prendre de longues minutes).
+    if (proxiesRunning) {
+      proxiesRunning = false;
+      signalEnd(banner);
+    }
   }
 }
 
@@ -610,6 +679,107 @@ async function makeProxiesForSelection() {
   });
 }
 
+/* ---------- Nettoyage des proxys ---------- */
+
+async function cleanupProxies() {
+  await runTask("Analyse des proxys", async () => {
+    status.phase("Recherche des proxys du projet");
+    const project = await ppro.Project.getActiveProject();
+    if (!project) throw new Error("Aucun projet ouvert.");
+    const media = await premiere.listProjectMedia(project);
+    const known = settings.getJSON(storage, "createdProxies", []);
+    const scan = await cleanup.scanProxies({ fs }, media, known);
+    // Ne jamais proposer un proxy en cours d'encodage.
+    const encoding = new Set(proxies.pendingPaths().map((p) => p.toLowerCase()));
+    const unused = scan.unused.filter((f) => !encoding.has(f.path.toLowerCase()));
+    const used = `${scan.inUse.length} proxy(s) utilisé(s) · ${cleanup.formatBytes(cleanup.totalBytes(scan.inUse))}`;
+    log(`Proxys Rotate : ${used} · ${unused.length} inutilisé(s) · ${cleanup.formatBytes(cleanup.totalBytes(unused))}`, "info");
+    if (!unused.length) return { kind: "ok", title: "Aucun proxy inutile", detail: used };
+
+    const chosen = await checklistDialog({
+      intro: `${unused.length} proxy(s) ne sont attachés à aucun clip de ce projet (${cleanup.formatBytes(cleanup.totalBytes(unused))}). S'ils servent dans un autre projet, il faudra les recréer.`,
+      items: unused.map((f) => ({ label: `${f.path.split(/[\\/]/).pop()}   ${cleanup.formatBytes(f.bytes)}`, value: f })),
+      okLabel: (values) => `Supprimer ${values.length} (${cleanup.formatBytes(cleanup.totalBytes(values))})`,
+      cancelLabel: "Garder",
+    });
+    if (!chosen) return { kind: "idle", title: "Nettoyage annulé", detail: used };
+
+    status.phase("Suppression");
+    const result = await cleanup.deleteFiles({ fs }, chosen.map((f) => f.path));
+    const deleted = new Set(result.deleted.map((p) => p.toLowerCase()));
+    settings.setJSON(storage, "createdProxies", known.filter((p) => !deleted.has(p.toLowerCase())));
+    const freed = cleanup.totalBytes(chosen.filter((f) => deleted.has(f.path.toLowerCase())));
+    result.deleted.forEach((p) => log(`Supprimé : ${p}`, "ok"));
+    result.failed.forEach((p) => log(`Impossible de supprimer : ${p}`, "error"));
+    if (result.failed.length) {
+      return { kind: "warn", title: `${cleanup.formatBytes(freed)} libérés`, detail: `${result.deleted.length} supprimé(s) · ${result.failed.length} impossible(s) à supprimer` };
+    }
+    return { kind: "ok", title: `${cleanup.formatBytes(freed)} libérés`, detail: `${result.deleted.length} proxy(s) inutile(s) supprimé(s) · ${used}` };
+  });
+}
+
+/* ---------- Raccourcis clavier (panneau actif) ---------- */
+
+let shortcuts = shortcutKeys.withDefaults(settings.getJSON(storage, "shortcuts", null));
+let capturing = null; // action en attente d'une nouvelle touche
+
+const SHORTCUT_ACTIONS = {
+  rotateDefault: () => runRotation(defaultRotation).then(renderUndo),
+  rotateReset: () => runRotation(0).then(renderUndo),
+  undo: () => undoLast(false),
+  proxies: () => makeProxiesForSelection(),
+};
+
+function renderShortcuts() {
+  document.querySelectorAll("[data-shortcut]").forEach((button) => {
+    const action = button.getAttribute("data-shortcut");
+    button.textContent = capturing === action ? "Appuie sur une touche…" : shortcuts[action] || "—";
+  });
+}
+
+function onKeyDown(event) {
+  if (capturing) {
+    event.preventDefault();
+    if (event.key === "Escape") {
+      capturing = null;
+    } else if (event.key === "Backspace" || event.key === "Delete") {
+      shortcuts = shortcutKeys.assign(shortcuts, capturing, "");
+      capturing = null;
+    } else {
+      const key = shortcutKeys.normalizeKey(event);
+      if (!key) return; // touche non utilisable : on attend une lettre ou un chiffre
+      shortcuts = shortcutKeys.assign(shortcuts, capturing, key);
+      capturing = null;
+    }
+    settings.setJSON(storage, "shortcuts", shortcuts);
+    renderShortcuts();
+    return;
+  }
+  if (event.key === "Escape" && busy) {
+    cancelRequested = true;
+    $("status-detail").textContent = "Arrêt après le rush en cours…";
+    return;
+  }
+  const tag = String((event.target && event.target.tagName) || "").toLowerCase();
+  if (busy || tag === "input" || tag === "textarea" || tag === "sp-textfield") return;
+  const action = shortcutKeys.actionFor(shortcuts, shortcutKeys.normalizeKey(event));
+  if (action) {
+    event.preventDefault();
+    SHORTCUT_ACTIONS[action]();
+  }
+}
+
+/* ---------- Instagram ---------- */
+
+async function openInstagram() {
+  try {
+    const error = await uxp.shell.openExternal(INSTAGRAM_URL, "Ouvrir le profil Instagram de @robin.rahoual");
+    if (error) log(`Impossible d'ouvrir Instagram : ${error}`, "warn");
+  } catch (e) {
+    log(`Impossible d'ouvrir Instagram : ${errorMessage(e)}`, "warn");
+  }
+}
+
 /* ---------- Sens par défaut et options ---------- */
 
 function setChecked(el, value) {
@@ -656,6 +826,20 @@ $("proxy-size").addEventListener("change", (event) => {
   renderPreset();
 });
 $("make-proxies").addEventListener("click", makeProxiesForSelection);
+$("clean-proxies").addEventListener("click", cleanupProxies);
+$("opt-end-sound").addEventListener("change", (e) => settings.setBool(storage, "endSound", e.target.checked));
+$("test-signal").addEventListener("click", () => {
+  status.finish("ok", "Test du signal de fin", "Le bilan clignote et le son est joué (si activé).");
+  signalEnd($("status"));
+});
+$("instagram").addEventListener("click", openInstagram);
+document.querySelectorAll("[data-shortcut]").forEach((button) => {
+  button.addEventListener("click", () => {
+    capturing = capturing === button.getAttribute("data-shortcut") ? null : button.getAttribute("data-shortcut");
+    renderShortcuts();
+  });
+});
+document.addEventListener("keydown", onKeyDown);
 
 document.querySelectorAll("[data-rotation]").forEach((button) => {
   button.addEventListener("click", () => runRotation(Number(button.getAttribute("data-rotation"))).then(renderUndo));
@@ -663,6 +847,8 @@ document.querySelectorAll("[data-rotation]").forEach((button) => {
 
 setChecked($("opt-preview"), settings.getBool(storage, "preview", true));
 setChecked($("opt-auto-proxy"), settings.getBool(storage, "autoProxy", false));
+setChecked($("opt-end-sound"), settings.getBool(storage, "endSound", true));
+renderShortcuts();
 renderDefault();
 renderPreset();
 renderUndo();
@@ -678,7 +864,7 @@ renderProxyBanner();
   } catch (e) {
     version = "";
   }
-  if (version) log(`${version} · Rotate ${manifest.version}`, "info");
+  log(`Rotate ${manifest.version} · gratuit · par @robin.rahoual${version ? ` · ${version}` : ""}`, "info");
   if (missingRequired.length) {
     status.finish("error", "Plugin à mettre à jour", `Cette version de Premiere ne fournit plus : ${missingRequired.join(", ")}.`);
     log(`Fonctions Premiere manquantes : ${missingRequired.join(", ")}`, "error");
