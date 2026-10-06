@@ -52,6 +52,7 @@ function extensionFromPreset(eprText) {
 function createProxyQueue(deps) {
   const log = deps.log || (() => {});
   const onChange = deps.onChange || (() => {});
+  const onJobDone = deps.onJobDone || (() => {});
   const now = deps.now || (() => Date.now());
   const clipCache = new Map(); // chemin du rush -> ClipProjectItem
   let pending = (deps.load && deps.load()) || [];
@@ -174,6 +175,7 @@ function createProxyQueue(deps) {
         if (problem) {
           pending = pending.filter((p) => p !== job);
           log(`${job.name} : proxy non attaché - ${problem}`, "error");
+          onJobDone(job, false);
           save();
           continue;
         }
@@ -189,6 +191,7 @@ function createProxyQueue(deps) {
         pending = pending.filter((p) => p !== job);
         if (attached) log(`${job.name} : proxy vertical attaché`, "ok");
         else log(`${job.name} : proxy prêt mais impossible de l'attacher (clic droit > Proxy > Attacher les proxys)`, "warn");
+        onJobDone(job, attached);
         save();
       }
     } finally {

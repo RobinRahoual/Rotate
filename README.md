@@ -19,23 +19,45 @@ Le Sony A7 III laisse toujours cette matrice « à l'horizontale ». Le plugin s
 Ensuite le plugin demande à Premiere de relire le média (*Actualiser le média*) : le clip apparaît en
 vertical (ex. 2160×3840) dans le chutier, le moniteur source et les nouvelles séquences.
 
-## Installation (mode développement)
+## Installation
 
-Prérequis : **Premiere Pro 25.6 ou plus récent** et l'application **UXP Developer Tool**
-(installable depuis Creative Cloud > Applications > Toutes les applications).
+### Installation durable (recommandée)
+
+1. Récupère le fichier `Rotate-<version>.ccx` (ou fabrique-le : `npm run package` → dossier `dist/`).
+2. **Double-clique** dessus : l'application Creative Cloud s'ouvre et l'installe (elle prévient que le
+   plugin ne vient pas de la Marketplace : clique sur *Installer*).
+3. Dans Premiere : *Fenêtre > Plugins UXP > Rotate*.
+
+Le plugin reste installé après un redémarrage ou une mise à jour de Premiere. Pour le désinstaller :
+application Creative Cloud > *Gérer les plugins*. Si tu utilisais la version de développement, décharge-la
+d'abord dans UXP Developer Tool (sinon les deux se mélangent).
+
+### Mode développement (pour modifier le plugin)
+
+Prérequis : **Premiere Pro 25.6 ou plus récent** et l'application **UXP Developer Tool**.
 
 1. Dans Premiere : *Paramètres > Plugins* → cocher **Activer le mode développeur**, puis redémarrer Premiere.
 2. Ouvrir **UXP Developer Tool** → *Add Plugin* → sélectionner `plugin/manifest.json`.
-3. Cliquer sur **Load** (Premiere doit être ouvert).
-4. Dans Premiere : *Fenêtre > Plugins UXP > Rotate*.
+3. Cliquer sur **Load** (Premiere doit être ouvert). À refaire à chaque lancement de Premiere.
 
 ## Utilisation
 
 1. Dans le panneau **Projet**, sélectionne un ou plusieurs rushs **ou des chutiers entiers**
    (les sous-chutiers sont parcourus aussi).
 2. Clique sur **Tourner en vertical** (en haut du panneau, toujours visible) : la rotation se fait
-   dans ton **sens par défaut**. Une barre de progression et un bouton **Annuler** s'affichent pendant
-   le traitement.
+   dans ton **sens par défaut**.
+
+### Suivi de l'opération
+
+Pendant le traitement, le bloc d'état en haut du panneau montre que ça tourne (icône animée et temps
+écoulé), l'étape en cours (analyse de la sélection, lecture des rushs, rotation), où on en est
+(« 3/12 · C0003.MP4 »), une barre de progression et le temps restant estimé. Le bouton **Arrêter**
+interrompt proprement après le rush en cours.
+
+À la fin, le bloc indique le résultat : **✓ vert** si tout s'est bien passé, **⚠ orange** s'il y a eu des
+problèmes sur certains rushs, **✕ rouge** en cas d'échec, avec **Voir le détail** pour aller au journal.
+Les proxys en cours dans Media Encoder ont leur propre suivi (« Proxys : 2/5 prêts »).
+
 
 ### Aperçu avant validation
 
@@ -70,8 +92,7 @@ modifié entre-temps par une autre opération n'est pas touché.
 - **Remettre la sélection à l'horizontale**
 - **Annuler la dernière opération Rotate**
 
-Lancées depuis le menu, ces actions sont silencieuses si tout va bien ; une fenêtre s'affiche seulement
-en cas de problème.
+Lancées depuis le menu, ces actions ouvrent le panneau Rotate pour que tu suives leur avancement.
 
 ### Raccourci clavier
 
@@ -126,6 +147,14 @@ fichiers légers, que tu peux supprimer à tout moment sans risque pour tes rush
 Si tu remets un rush à l'horizontale, son proxy vertical ne correspond plus : désactive les proxys ou
 recrée-les.
 
+## Mises à jour de Premiere
+
+Le cœur du plugin (la rotation) ne dépend pas de Premiere : il modifie une donnée standard du format
+MP4/MOV. Le plugin n'a pas de version maximale et continue de se charger dans les versions suivantes
+de Premiere. Au démarrage, il vérifie que les fonctions de Premiere dont il a besoin existent toujours
+et affiche « Plugin à mettre à jour » dans le cas contraire, plutôt que d'échouer en pleine rotation.
+Le préréglage des proxys est recréé automatiquement s'il ne fonctionne plus.
+
 ## Performances
 
 - Le plugin ne lit que quelques centaines d'octets par rush (les en-têtes utiles), quelle que soit la
@@ -148,7 +177,8 @@ recrée-les.
 ## Tests
 
 ```bash
-npm test   # nécessite Node 18+ et ffmpeg/ffprobe
+npm test          # nécessite Node 18+ et ffmpeg/ffprobe
+npm run package   # fabrique dist/Rotate-<version>.ccx
 ```
 
 Les tests génèrent de vrais MP4/MOV avec ffmpeg, appliquent les rotations et vérifient avec ffprobe que
@@ -167,6 +197,7 @@ plugin/
   src/proxies.js       proxys verticaux via Media Encoder, vérification et attachement automatique
   src/presets.js       création et vérification automatiques du préréglage Media Encoder vertical
   src/inflate.js       décompression gzip (certains préréglages Adobe sont compressés)
+  src/compat.js        vérification de compatibilité avec la version de Premiere
   assets/calibration.mp4  vidéo de 1 s (4 Ko) pour l'encodage test du préréglage
   test/                tests Node + ffmpeg
 ```

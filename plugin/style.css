@@ -5,6 +5,8 @@
  */
 
 body.theme-dark {
+  --accent: #4b9cf5;
+  --status-bg: rgba(255, 255, 255, 0.04);
   --text: #d1d1d1;
   --text-muted: #8f8f8f;
   --border: #3c3c3c;
@@ -13,6 +15,8 @@ body.theme-dark {
   --error: #ef5d5d;
 }
 body.theme-light {
+  --accent: #1473e6;
+  --status-bg: rgba(0, 0, 0, 0.04);
   --text: #2c2c2c;
   --text-muted: #6e6e6e;
   --border: #c8c8c8;
@@ -51,25 +55,50 @@ body {
   width: 100%;
 }
 
-#summary {
-  margin: 6px 0 0;
+/* ---------- Bloc d'état (en cours / terminé / problème) ---------- */
+
+.status {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--border);
+  background-color: var(--status-bg);
 }
+.status.running { border-left-color: var(--accent); }
+.status.ok { border-left-color: var(--ok); }
+.status.warn { border-left-color: var(--warn); }
+.status.error { border-left-color: var(--error); }
+.status.idle { background-color: transparent; padding-left: 0; border-left-color: transparent; }
+
+.status-top {
+  display: flex;
+  align-items: center;
+}
+.status-icon {
+  width: 16px;
+  font-size: 12px;
+}
+.status.running .status-icon { color: var(--accent); }
+.status.ok .status-icon { color: var(--ok); }
+.status.warn .status-icon { color: var(--warn); }
+.status.error .status-icon { color: var(--error); }
+.status-title {
+  flex: 1;
+  margin: 0;
+}
+.status sp-progressbar {
+  width: 100%;
+  margin: 4px 0 2px;
+}
+#status-detail,
+#proxy-banner-text {
+  margin: 2px 0 0;
+}
+.status.proxy { border-left-color: var(--accent); }
 
 .scroll {
   flex: 1;
   overflow-y: auto;
   padding: 0 10px 10px;
-}
-
-.progress {
-  display: flex;
-  align-items: center;
-  margin-top: 6px;
-}
-
-.progress sp-progressbar {
-  flex: 1;
-  margin-right: 6px;
 }
 
 .hidden {

@@ -1,6 +1,8 @@
 "use strict";
 
-const { entrypoints, storage: uxpStorage } = require("uxp");
+const uxp = require("uxp");
+const { entrypoints, storage: uxpStorage } = uxp;
+const manifest = require("./manifest.json");
 const ppro = require("premierepro");
 const fs = require("fs");
 const premiere = require("./src/premiere.js");
@@ -8,6 +10,7 @@ const rotation = require("./src/mp4rotation.js");
 const settings = require("./src/settings.js");
 const { createProxyQueue, waitForCompleteFile } = require("./src/proxies.js");
 const presets = require("./src/presets.js");
+const { checkCompatibility } = require("./src/compat.js");
 const os = require("os");
 
 const MAX_LOG_LINES = 300;
@@ -54,51 +57,142 @@ function log(message, level = "info") {
   while (container.childNodes.length > MAX_LOG_LINES) container.removeChild(container.firstChild);
 }
 
-function setSummary(text) {
-  $("summary").textContent = text;
-}
-
 function errorMessage(e) {
   return e && e.message ? e.message : String(e);
 }
 
-/* ---------- Progression ---------- */
+/* ---------- Bloc d'état : en cours, où on en est, terminé ou problème ---------- */
 
 function setDisabled(el, disabled) {
   if (disabled) el.setAttribute("disabled", "");
   else el.removeAttribute("disabled");
 }
 
+function show(el, visible) {
+  if (visible) el.classList.remove("hidden");
+  else el.classList.add("hidden");
+}
+
+function formatDuration(ms) {
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+}
+
+const status = (() => {
+  let title = "";
+  let started = 0;
+  let phaseLabel = "";
+  let phaseStarted = 0;
+  let ticker = null;
+  let lastUpdate = 0;
+  let frame = 0;
+  const SPINNER = ["◐", "◓", "◑", "◒"];
+
+  function setKind(kind) {
+    $("status").className = `status ${kind}`;
+  }
+
+  // Toutes les 250 ms : icône animée et temps écoulé, pour voir que ça tourne.
+  function tick() {
+    frame = (frame + 1) % SPINNER.length;
+    $("status-icon").textContent = SPINNER[frame];
+    $("status-title").textContent = `${title} · ${formatDuration(Date.now() - started)}`;
+  }
+
+  function start(text) {
+    title = text;
+    started = Date.now();
+    phaseLabel = "";
+    setKind("running");
+    show($("cancel"), true);
+    show($("status-close"), false);
+    show($("status-log"), false);
+    show($("progress-bar"), true);
+    $("progress-bar").setAttribute("value", "0");
+    $("status-detail").textContent = "Démarrage…";
+    if (ticker) clearInterval(ticker);
+    ticker = setInterval(tick, 250);
+    tick();
+  }
+
+  function phase(label) {
+    phaseLabel = label;
+    phaseStarted = Date.now();
+    lastUpdate = 0;
+    $("progress-bar").setAttribute("value", "0");
+    $("status-detail").textContent = `${label}…`;
+  }
+
+  // Mise à jour limitée à ~10 fois par seconde pour ne pas charger l'interface.
+  function progress(done, total, name) {
+    const now = Date.now();
+    if (done < total && now - lastUpdate < 100) return;
+    lastUpdate = now;
+    if (!total) {
+      $("status-detail").textContent = done ? `${phaseLabel} · ${done} rush(s) trouvé(s)` : `${phaseLabel}…`;
+      return;
+    }
+    $("progress-bar").setAttribute("value", String(Math.round((Math.min(done, total) / total) * 100)));
+    let text = `${phaseLabel} · ${Math.min(done + (name ? 1 : 0), total)}/${total}`;
+    if (name) text += ` · ${name}`;
+    if (done >= 2 && done < total) {
+      const remaining = ((now - phaseStarted) / done) * (total - done);
+      if (remaining > 1500) text += ` · encore ~${formatDuration(remaining)}`;
+    }
+    $("status-detail").textContent = text;
+  }
+
+  /* kind : "ok" | "warn" | "error" | "idle" */
+  function finish(kind, text, detail) {
+    if (ticker) clearInterval(ticker);
+    ticker = null;
+    setKind(kind);
+    $("status-icon").textContent = { ok: "✓", warn: "⚠", error: "✕", idle: "" }[kind] || "";
+    $("status-title").textContent = text;
+    $("status-detail").textContent = detail || "";
+    show($("cancel"), false);
+    show($("progress-bar"), false);
+    show($("status-close"), kind !== "idle");
+    show($("status-log"), kind === "warn" || kind === "error");
+  }
+
+  function reset() {
+    finish("idle", "Prêt", "Sélectionne des rushs ou des chutiers dans le panneau Projet.");
+  }
+
+  return { start, phase, progress, finish, reset };
+})();
+
+const onProgress = (done, total, name) => status.progress(done, total, name);
+
+const PHASES = {
+  collect: "Analyse de la sélection",
+  inspect: "Lecture des rushs",
+  apply: "Rotation",
+};
+
 function setBusy(value) {
   busy = value;
-  if (value) $("progress").classList.remove("hidden");
-  else $("progress").classList.add("hidden");
   [$("rotate-default"), $("make-proxies"), ...document.querySelectorAll("[data-rotation]")].forEach((b) => setDisabled(b, value));
   renderUndo();
 }
 
-// Mise à jour de la barre limitée à ~10 fois par seconde pour ne pas surcharger l'interface.
-let lastProgressUpdate = 0;
-function onProgress(done, total, name) {
-  const now = Date.now();
-  if (done < total && now - lastProgressUpdate < 100) return;
-  lastProgressUpdate = now;
-  $("progress-bar").setAttribute("value", String(total ? Math.round((done / total) * 100) : 0));
-  $("progress-label").textContent = name ? `${done + 1}/${total} · ${name}` : `${done}/${total}`;
-}
-
-/* Exécute une tâche longue avec la barre de progression et le bouton Arrêter. */
+/*
+ * Exécute une tâche longue avec le bloc d'état. La tâche renvoie
+ * { kind, title, detail } pour l'affichage final ; une exception = échec.
+ */
 async function runTask(label, task) {
   if (busy) return null;
   cancelRequested = false;
   setBusy(true);
-  onProgress(0, 0, "");
-  setSummary(label);
+  status.start(label);
   try {
-    return await task();
+    const result = (await task()) || { kind: "ok", title: "Terminé" };
+    status.finish(result.kind, result.title, result.detail);
+    return { ok: result.kind !== "error" && result.kind !== "warn", message: `${result.title}${result.detail ? ` - ${result.detail}` : ""}` };
   } catch (e) {
     const message = errorMessage(e);
-    setSummary(message);
+    status.finish("error", "Échec", message);
     log(message, "error");
     return { ok: false, message };
   } finally {
@@ -250,16 +344,15 @@ async function undoLast(fromMenu) {
   }
   const question = `Annuler la dernière opération (${describeOperation(last)}) ? Ces rushs retrouveront leur sens d'avant.`;
   if (!(await confirmDialog(question, "Annuler l'opération", "Garder"))) return;
-  const result = await runTask("Annulation en cours…", async () => {
+  const result = await runTask("Annulation en cours", async () => {
+    status.phase("Remise du sens d'avant");
     const r = await premiere.undoOperation(last, { log, onProgress });
     settings.popHistory(storage);
     const parts = [`${r.restored} remis comme avant`];
     if (r.skipped) parts.push(`${r.skipped} laissé(s) tel quel (modifié depuis)`);
     if (r.failed) parts.push(`${r.failed} échec(s)`);
-    const message = `Annulation terminée : ${parts.join(", ")}.`;
-    setSummary(message);
-    log(message, r.failed ? "warn" : "ok");
-    return { ok: !r.failed, message };
+    log(`Annulation terminée : ${parts.join(", ")}.`, r.failed ? "warn" : "ok");
+    return { kind: r.failed ? "warn" : "ok", title: r.failed ? "Annulation terminée avec des problèmes" : "Annulation terminée", detail: parts.join(" · ") };
   });
   renderUndo();
   if (fromMenu && result && !result.ok) await showMessage(result.message);
@@ -267,54 +360,71 @@ async function undoLast(fromMenu) {
 
 /* ---------- Rotation ---------- */
 
-function formatSummary(degrees, r, elapsed) {
-  const parts = [`${r.done} tourné(s)`];
-  if (r.unchanged) parts.push(`${r.unchanged} déjà à ${settings.rotationLabel(degrees)}`);
-  if (r.failed) parts.push(`${r.failed} échec(s)`);
-  const seconds = (elapsed / 1000).toFixed(1);
-  return `${r.cancelled ? "Arrêté" : "Terminé"} en ${seconds} s : ${parts.join(", ")}.`;
-}
-
 async function runRotation(degrees) {
   const started = Date.now();
-  return runTask("Analyse de la sélection…", async () => {
+  return runTask(`Rotation ${settings.rotationLabel(degrees)} en cours`, async () => {
     const usePreview = settings.getBool(storage, "preview", true);
     const result = await premiere.rotateSelection(degrees, {
       log,
       onProgress,
+      onPhase: (p) => status.phase(PHASES[p] || p),
       isCancelled: () => cancelRequested,
       confirm: usePreview ? (items) => previewDialog(items, degrees) : null,
     });
-    if (result.aborted) {
-      setSummary("Rotation annulée, aucun fichier modifié.");
-      return { ok: true, message: "" };
-    }
+    if (result.aborted) return { kind: "idle", title: "Rotation annulée", detail: "Aucun fichier modifié." };
     if (result.operation) settings.pushHistory(storage, result.operation);
 
     const t = result.timings;
-    const summary = formatSummary(degrees, result, Date.now() - started);
-    setSummary(summary);
-    log(summary, result.failed ? "warn" : "ok");
+    const elapsed = formatDuration(Date.now() - started);
+    const parts = [`${result.done} tourné(s)`];
+    if (result.unchanged) parts.push(`${result.unchanged} déjà à ${settings.rotationLabel(degrees)}`);
+    if (result.failed) parts.push(`${result.failed} problème(s)`);
+    const detail = parts.join(" · ");
+    log(`${result.cancelled ? "Arrêté" : "Terminé"} en ${elapsed} : ${detail}.`, result.failed ? "warn" : "ok");
     log(`Détail : sélection ${t.collect} ms · fichiers ${t.files} ms · actualisation Premiere ${t.refresh} ms`, "info");
 
     // Proxys automatiques pour les rushs qui viennent d'être tournés.
     if (degrees !== 0 && result.operation && result.operation.files.length && settings.getBool(storage, "autoProxy", false)) {
       const paths = new Set(result.operation.files.map((f) => f.path));
-      await startProxies(result.items.filter((i) => paths.has(i.entry.path)).map((i) => i.entry));
+      const queued = await startProxies(result.items.filter((i) => paths.has(i.entry.path)).map((i) => i.entry));
+      if (queued < 0 && !result.failed) {
+        return { kind: "warn", title: `Rotation terminée · ${elapsed}`, detail: `${detail} · proxys non lancés (voir le journal)` };
+      }
     }
     if (degrees === 0 && result.done) {
       log("Si ces rushs avaient des proxys verticaux, désactive les proxys ou recrée-les.", "info");
     }
-    return { ok: !result.failed, message: summary };
+
+    if (result.cancelled) return { kind: "warn", title: `Arrêté après ${elapsed}`, detail };
+    if (result.failed && !result.done) return { kind: "error", title: "Aucun rush n'a pu être tourné", detail };
+    if (result.failed) return { kind: "warn", title: `Terminé avec ${result.failed} problème(s) · ${elapsed}`, detail };
+    if (!result.done && !result.unchanged) return { kind: "warn", title: "Rien à tourner", detail: "Aucun rush MP4/MOV dans la sélection." };
+    return { kind: "ok", title: `Terminé · ${elapsed}`, detail };
   });
 }
 
-// Depuis le menu, on reste silencieux si tout s'est bien passé : on ne prévient qu'en cas de souci.
+/* Affiche le panneau Rotate (pour suivre une action lancée depuis le menu). */
+function showOwnPanel() {
+  try {
+    const me = [...uxp.pluginManager.plugins].find((p) => p.id === manifest.id);
+    if (me) {
+      me.showPanel("rotatePanel");
+      return true;
+    }
+  } catch (e) {
+    // pas de pluginManager : on préviendra par une fenêtre en cas de souci
+  }
+  return false;
+}
+
+// Depuis le menu, on ouvre le panneau pour suivre l'avancement ; une fenêtre ne s'affiche
+// en cas de problème que si le panneau n'a pas pu être ouvert.
 async function runFromMenu(degrees) {
   if (busy) return showMessage("Une opération est déjà en cours.");
+  const panelShown = showOwnPanel();
   const result = await runRotation(degrees);
   renderUndo();
-  if (result && !result.ok) await showMessage(result.message);
+  if (result && !result.ok && !panelShown) await showMessage(result.message);
 }
 
 /* ---------- Proxys ---------- */
@@ -328,12 +438,42 @@ const proxies = createProxyQueue({
   load: () => settings.getJSON(storage, "pendingProxies", []),
   save: (list) => settings.setJSON(storage, "pendingProxies", list),
   log,
-  onChange: (count) => {
-    $("proxy-status").textContent = count
-      ? `${count} proxy(s) en cours dans Media Encoder, attachés automatiquement à la fin.`
-      : "";
+  onChange: () => renderProxyBanner(),
+  onJobDone: (job, ok) => {
+    if (ok) proxyBatch.done++;
+    else proxyBatch.failed++;
+    renderProxyBanner();
   },
 });
+
+// Suivi des proxys en cours : X/Y prêts, puis bilan.
+const proxyBatch = { total: 0, done: 0, failed: 0 };
+
+function renderProxyBanner() {
+  const pending = proxies.pendingCount();
+  const banner = $("proxy-banner");
+  if (!proxyBatch.total && !pending) {
+    show(banner, false);
+    return;
+  }
+  if (proxyBatch.total < proxyBatch.done + proxyBatch.failed + pending) {
+    proxyBatch.total = proxyBatch.done + proxyBatch.failed + pending;
+  }
+  show(banner, true);
+  const finished = proxyBatch.done + proxyBatch.failed;
+  $("proxy-bar").setAttribute("value", String(Math.round((finished / proxyBatch.total) * 100)));
+  if (pending) {
+    banner.className = "status proxy";
+    show($("proxy-bar"), true);
+    $("proxy-banner-text").textContent = `◐ Proxys : ${finished}/${proxyBatch.total} prêts · Media Encoder travaille en arrière-plan`;
+  } else {
+    banner.className = `status ${proxyBatch.failed ? "warn" : "ok"}`;
+    show($("proxy-bar"), false);
+    $("proxy-banner-text").textContent = proxyBatch.failed
+      ? `⚠ Proxys : ${proxyBatch.done} attaché(s), ${proxyBatch.failed} problème(s) (voir le journal)`
+      : `✓ ${proxyBatch.done} proxy(s) vertical(aux) attaché(s) · active les proxys dans le moniteur`;
+  }
+}
 
 function proxySize() {
   const value = settings.getString(storage, "proxySize");
@@ -403,7 +543,7 @@ async function ensureProxyPreset() {
   if (settings.getString(storage, "proxyPresetMode") === "manual" && preset) return preset;
   if (preset && settings.getString(storage, "proxyPresetSize") === proxySize() && (await fileExists(preset))) return preset;
 
-  setSummary("Préparation du préréglage vertical (une seule fois, environ 30 s)…");
+  status.phase("Préparation du préréglage vertical (une seule fois, ~30 s)");
   const platform = os.platform();
   const sep = platform === "darwin" ? "/" : "\\";
   const { localFileSystem } = uxpStorage;
@@ -433,6 +573,7 @@ async function ensureProxyPreset() {
   return result.path;
 }
 
+/* Lance les proxys ; renvoie le nombre mis en file, ou -1 si le préréglage n'a pas pu être préparé. */
 async function startProxies(entries) {
   if (!entries.length) return 0;
   let preset;
@@ -440,28 +581,32 @@ async function startProxies(entries) {
     preset = await ensureProxyPreset();
   } catch (e) {
     log(`Proxys : ${errorMessage(e)}`, "error");
-    return 0;
+    return -1;
   }
+  status.phase("Envoi à Media Encoder");
+  // Nouveau lot : on repart de zéro si le précédent était terminé.
+  if (!proxies.pendingCount()) Object.assign(proxyBatch, { total: 0, done: 0, failed: 0 });
   const queued = await proxies.create(entries, preset);
   if (queued) log(`${queued} proxy(s) envoyé(s) à Media Encoder.`, "ok");
+  renderProxyBanner();
   return queued;
 }
 
 async function makeProxiesForSelection() {
-  await runTask("Recherche des rushs tournés…", async () => {
-    const { clips } = await premiere.collectSelectedClips();
+  await runTask("Création des proxys", async () => {
+    status.phase(PHASES.collect);
+    const { clips } = await premiere.collectSelectedClips((n) => onProgress(n, 0, ""));
     // On ne fait des proxys verticaux que pour les rushs déjà tournés.
-    const items = await premiere.inspectClips(clips, 0);
+    status.phase(PHASES.inspect);
+    const items = await premiere.inspectClips(clips, 0, onProgress);
     const rotated = items.filter((i) => i.status === "todo").map((i) => i.entry);
     const horizontal = items.filter((i) => i.status === "unchanged").length;
     if (horizontal) log(`${horizontal} rush(s) horizontaux ignorés (tourne-les d'abord).`, "info");
-    if (!rotated.length) {
-      setSummary("Aucun rush tourné dans la sélection.");
-      return { ok: true, message: "" };
-    }
+    if (!rotated.length) return { kind: "warn", title: "Aucun rush tourné dans la sélection", detail: "Tourne-les d'abord, puis crée les proxys." };
     const queued = await startProxies(rotated);
-    setSummary(queued ? `${queued} proxy(s) en cours dans Media Encoder.` : "Aucun proxy lancé.");
-    return { ok: queued > 0, message: "" };
+    if (queued < 0) return { kind: "error", title: "Proxys non lancés", detail: "Le préréglage n'a pas pu être préparé (voir le journal)." };
+    if (!queued) return { kind: "warn", title: "Aucun proxy lancé", detail: "Voir le journal." };
+    return { kind: "ok", title: `${queued} proxy(s) envoyé(s) à Media Encoder`, detail: "Ils seront attachés automatiquement dès qu'ils sont prêts." };
   });
 }
 
@@ -486,9 +631,17 @@ $("rotate-default").addEventListener("click", () => runRotation(defaultRotation)
 $("undo").addEventListener("click", () => undoLast(false));
 $("cancel").addEventListener("click", () => {
   cancelRequested = true;
-  $("progress-label").textContent = "Arrêt après le clip en cours…";
+  $("status-detail").textContent = "Arrêt après le rush en cours…";
 });
 $("clear-log").addEventListener("click", () => ($("log").textContent = ""));
+$("status-close").addEventListener("click", () => status.reset());
+$("status-log").addEventListener("click", () => {
+  try {
+    $("log").scrollIntoView();
+  } catch (e) {
+    // défilement non pris en charge : le journal reste en bas du panneau
+  }
+});
 
 $("default-choice").addEventListener("change", (event) => {
   defaultRotation = settings.setDefaultRotation(storage, Number(event.target.value));
@@ -514,6 +667,25 @@ renderDefault();
 renderPreset();
 renderUndo();
 proxies.resume();
+renderProxyBanner();
+
+// Après une grosse mise à jour de Premiere : prévenir tout de suite si une fonction manque.
+(() => {
+  const { missingRequired, missingOptional } = checkCompatibility(ppro);
+  let version = "";
+  try {
+    version = uxp.host ? `${uxp.host.name} ${uxp.host.version}` : "";
+  } catch (e) {
+    version = "";
+  }
+  if (version) log(`${version} · Rotate ${manifest.version}`, "info");
+  if (missingRequired.length) {
+    status.finish("error", "Plugin à mettre à jour", `Cette version de Premiere ne fournit plus : ${missingRequired.join(", ")}.`);
+    log(`Fonctions Premiere manquantes : ${missingRequired.join(", ")}`, "error");
+  } else if (missingOptional.length) {
+    log(`Proxys indisponibles avec cette version de Premiere (manque : ${missingOptional.join(", ")}).`, "warn");
+  }
+})();
 
 /* ---------- Entrées du menu Fenêtre > Plugins UXP > Rotate ---------- */
 

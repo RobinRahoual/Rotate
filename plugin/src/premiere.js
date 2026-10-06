@@ -99,7 +99,7 @@ function isLockedFileError(e) {
  * Retourne { project, clips: [{ name, path, clip }], skipped: [{ name, reason }], duplicates }.
  * Un seul élément est gardé par fichier source.
  */
-async function collectSelectedClips() {
+async function collectSelectedClips(onFound = () => {}) {
   const project = await ppro.Project.getActiveProject();
   if (!project) throw new Error("Aucun projet ouvert.");
   const selection = await ppro.ProjectUtils.getSelection(project);
@@ -144,6 +144,7 @@ async function collectSelectedClips() {
       }
       seenPaths.add(entry.path);
       clips.push(entry);
+      onFound(clips.length);
     }
 
     for (const bin of bins) {
@@ -235,8 +236,10 @@ function describeError(e) {
  * prépare les écritures. Retourne [{ entry, status, previous, plan, error }]
  * avec status = "todo" | "unchanged" | "error".
  */
-async function inspectClips(clips, degrees) {
+async function inspectClips(clips, degrees, onProgress = () => {}) {
+  let done = 0;
   return mapLimit(clips, 4, async (entry) => {
+    onProgress(done++, clips.length, entry.name);
     try {
       const plan = await withFile(entry.path, "r", (io) => rotation.planRotation(io, degrees));
       return { entry, status: plan.writes.length ? "todo" : "unchanged", previous: plan.previous, plan };
@@ -310,13 +313,17 @@ async function applyRotations(project, items, degrees, options = {}) {
  *   onProgress(done, total, name)   avancement
  *   isCancelled()                   true pour arrêter proprement entre deux clips
  *   confirm(items)                  aperçu : renvoie les éléments à traiter, ou null pour abandonner
+ *   onPhase(phase)                  étape en cours : "collect" | "inspect" | "apply"
  *
  * Retourne { done, unchanged, failed, cancelled, aborted, timings, operation, items }.
  */
 async function rotateSelection(degrees, options = {}) {
   const log = options.log || (() => {});
+  const onPhase = options.onPhase || (() => {});
+  const onProgress = options.onProgress || (() => {});
   let t = Date.now();
-  const { project, clips, skipped, duplicates } = await collectSelectedClips();
+  onPhase("collect");
+  const { project, clips, skipped, duplicates } = await collectSelectedClips((n) => onProgress(n, 0, ""));
   const timings = { collect: Date.now() - t, files: 0, refresh: 0 };
 
   skipped.forEach((s) => log(`${s.name} : ignoré (${s.reason})`, "warn"));
@@ -328,7 +335,8 @@ async function rotateSelection(degrees, options = {}) {
   }
 
   t = Date.now();
-  let items = await inspectClips(clips, degrees);
+  onPhase("inspect");
+  let items = await inspectClips(clips, degrees, onProgress);
   timings.collect += Date.now() - t;
   const errors = items.filter((i) => i.status === "error");
   errors.forEach((i) => log(`${i.entry.name} : échec - ${i.error}`, "error"));
@@ -339,6 +347,7 @@ async function rotateSelection(degrees, options = {}) {
     items = chosen;
   }
 
+  onPhase("apply");
   const applied = await applyRotations(project, items, degrees, options);
   timings.files = applied.timings.files;
   timings.refresh = applied.timings.refresh;

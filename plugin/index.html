@@ -11,13 +11,21 @@
         <div class="row header-row">
           <sp-action-button id="undo" quiet disabled>Annuler la dernière opération</sp-action-button>
         </div>
-        <div id="progress" class="progress hidden">
-          <sp-progressbar id="progress-bar" max="100" value="0" size="small">
-            <sp-label slot="label" id="progress-label">Traitement…</sp-label>
-          </sp-progressbar>
-          <sp-action-button id="cancel" quiet>Arrêter</sp-action-button>
+        <div id="status" class="status idle">
+          <div class="status-top">
+            <span id="status-icon" class="status-icon"></span>
+            <sp-body size="S" id="status-title" class="status-title">Prêt</sp-body>
+            <sp-action-button id="cancel" quiet class="hidden">Arrêter</sp-action-button>
+            <sp-action-button id="status-close" quiet class="hidden">✕</sp-action-button>
+          </div>
+          <sp-progressbar id="progress-bar" class="hidden" max="100" value="0" size="small" show-value="false"></sp-progressbar>
+          <sp-body size="XS" id="status-detail" class="muted">Sélectionne des rushs ou des chutiers dans le panneau Projet.</sp-body>
+          <sp-action-button id="status-log" quiet class="hidden">Voir le détail</sp-action-button>
         </div>
-        <sp-body size="XS" id="summary" class="muted">Sélectionne des rushs ou des chutiers dans le panneau Projet.</sp-body>
+        <div id="proxy-banner" class="status proxy hidden">
+          <sp-body size="XS" id="proxy-banner-text"></sp-body>
+          <sp-progressbar id="proxy-bar" max="100" value="0" size="small" show-value="false"></sp-progressbar>
+        </div>
       </div>
 
       <div class="scroll">
@@ -60,7 +68,6 @@
             <sp-action-button id="choose-preset" quiet>Choisir un préréglage manuel…</sp-action-button>
             <sp-action-button id="auto-preset" quiet>Revenir à l'automatique</sp-action-button>
           </div>
-          <sp-body size="XS" id="proxy-status" class="muted"></sp-body>
         </div>
 
         <div class="section">
