@@ -189,6 +189,48 @@ async function getRotation(io) {
   return matrixToRotation(tracks[0].matrix);
 }
 
+/*
+ * Infos de la première piste vidéo : taille stockée, rotation, taille affichée
+ * (après rotation) et cadence d'images. Sert à vérifier un proxy produit par
+ * Media Encoder avant de l'attacher.
+ */
+async function readVideoInfo(io) {
+  const fileSize = await io.size();
+  const [moov] = await findBoxes(io, 0, fileSize, ["moov"], true);
+  if (!moov) throw new Error("Aucune boîte \"moov\" trouvée.");
+  const [track] = await findVideoTracks(io);
+  const rot = matrixToRotation(track.matrix);
+  const swap = rot === 90 || rot === 270;
+  let fps = null;
+
+  for (const trak of await findBoxes(io, moov.start + moov.headerSize, moov.end, ["trak"], false)) {
+    const mdia = await findChild(io, trak, "mdia");
+    const hdlr = mdia && (await findChild(io, mdia, "hdlr"));
+    if (!hdlr || fourcc(await io.read(hdlr.start + hdlr.headerSize + 8, 4), 0) !== "vide") continue;
+    const mdhd = await findChild(io, mdia, "mdhd");
+    const minf = await findChild(io, mdia, "minf");
+    const stbl = minf && (await findChild(io, minf, "stbl"));
+    const stts = stbl && (await findChild(io, stbl, "stts"));
+    if (mdhd && stts) {
+      const head = await io.read(mdhd.start + mdhd.headerSize, 1);
+      const timescaleAt = mdhd.start + mdhd.headerSize + 4 + (head[0] === 1 ? 16 : 8);
+      const timescale = viewOf(await io.read(timescaleAt, 4)).getUint32(0);
+      const entry = viewOf(await io.read(stts.start + stts.headerSize, 16));
+      const delta = entry.getUint32(4) ? entry.getUint32(12) : 0;
+      if (timescale && delta) fps = timescale / delta;
+    }
+    break;
+  }
+  return {
+    width: track.width,
+    height: track.height,
+    rotation: rot,
+    displayWidth: swap ? track.height : track.width,
+    displayHeight: swap ? track.width : track.height,
+    fps,
+  };
+}
+
 function toHex(bytes) {
   let out = "";
   for (const b of bytes) out += b.toString(16).padStart(2, "0");
@@ -277,6 +319,7 @@ module.exports = {
   setRotation,
   restoreBytes,
   isComplete,
+  readVideoInfo,
   toHex,
   // exportés pour les tests
   buildMatrix,

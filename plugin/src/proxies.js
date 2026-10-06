@@ -125,6 +125,24 @@ function createProxyQueue(deps) {
     return entry ? entry.clip : null;
   }
 
+  /* Renvoie une explication si le proxy ne correspond pas au rush, sinon null. */
+  async function checkProxy(job) {
+    let info;
+    try {
+      info = await deps.withFile(job.proxyPath, "r", (io) => deps.rotation.readVideoInfo(io));
+    } catch (e) {
+      return "fichier illisible";
+    }
+    if (info.displayWidth >= info.displayHeight) return `proxy horizontal (${info.displayWidth}×${info.displayHeight})`;
+    if (job.aspect && Math.abs(info.displayWidth / info.displayHeight - job.aspect) > 0.01) {
+      return `format différent du rush (${info.displayWidth}×${info.displayHeight})`;
+    }
+    if (job.fps && info.fps && Math.abs(info.fps - job.fps) > 0.01) {
+      return `cadence différente du rush (${info.fps.toFixed(3)} au lieu de ${job.fps.toFixed(3)} i/s)`;
+    }
+    return null;
+  }
+
   /* Vérifie les encodages en attente et attache les proxys terminés. */
   async function check() {
     if (checking) return;
@@ -150,6 +168,15 @@ function createProxyQueue(deps) {
         const stable = job.lastSize === size;
         job.lastSize = size;
         if (!complete || !stable) continue;
+
+        // Contrôle avant d'attacher : proxy vertical, même format et même cadence que le rush.
+        const problem = await checkProxy(job);
+        if (problem) {
+          pending = pending.filter((p) => p !== job);
+          log(`${job.name} : proxy non attaché - ${problem}`, "error");
+          save();
+          continue;
+        }
 
         const clip = await resolveClip(job);
         if (!clip) continue; // projet fermé ou clip introuvable pour l'instant : on réessaiera
@@ -191,12 +218,26 @@ function createProxyQueue(deps) {
         continue;
       }
       try {
+        // Format affiché du rush (après rotation) : un proxy vertical n'a de sens que pour un rush vertical.
+        const source = await deps.withFile(entry.path, "r", (io) => deps.rotation.readVideoInfo(io));
+        if (source.displayWidth >= source.displayHeight) {
+          log(`${entry.name} : rush horizontal, pas de proxy vertical`, "info");
+          continue;
+        }
         const proxyPath = await uniqueProxyPath(entry.path, ext);
         // 0 = tout le clip ; supprimé de la file AME une fois terminé ; démarrage immédiat.
         const ok = await manager.encodeProjectItem(entry.clip, proxyPath, presetPath, 0, true, true);
         if (!ok) throw new Error("Media Encoder a refusé l'encodage");
         clipCache.set(entry.path, entry.clip);
-        pending.push({ path: entry.path, name: entry.name, proxyPath, queuedAt: now(), lastSize: null });
+        pending.push({
+          path: entry.path,
+          name: entry.name,
+          proxyPath,
+          queuedAt: now(),
+          lastSize: null,
+          aspect: source.displayWidth / source.displayHeight,
+          fps: source.fps,
+        });
         queued++;
       } catch (e) {
         log(`${entry.name} : proxy non lancé - ${e && e.message ? e.message : e}`, "error");
@@ -225,4 +266,28 @@ function createProxyQueue(deps) {
   };
 }
 
-module.exports = { createProxyQueue, extensionFromPreset, splitPath, PROXY_FOLDER };
+/*
+ * Attend qu'un fichier MP4/MOV produit par Media Encoder soit complet (boîte
+ * "moov" présente et taille stable). Renvoie false après `timeoutMs`.
+ */
+async function waitForCompleteFile(deps, path, timeoutMs, intervalMs = 1000) {
+  const start = Date.now();
+  let lastSize = -1;
+  while (Date.now() - start < timeoutMs) {
+    let size = null;
+    try {
+      size = (await deps.fs.lstat(path)).size;
+    } catch (e) {
+      size = null;
+    }
+    if (size !== null && size === lastSize) {
+      const complete = await deps.withFile(path, "r", (io) => deps.rotation.isComplete(io)).catch(() => false);
+      if (complete) return true;
+    }
+    lastSize = size === null ? -1 : size;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return false;
+}
+
+module.exports = { createProxyQueue, extensionFromPreset, splitPath, waitForCompleteFile, PROXY_FOLDER };

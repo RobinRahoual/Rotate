@@ -160,3 +160,7 @@ body {
 .preview footer sp-button {
   margin-left: 8px;
 }
+
+.label {
+  margin: 8px 0 2px;
+}

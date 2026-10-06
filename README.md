@@ -95,25 +95,30 @@ saccadés. La solution : des **proxys** légers dont les images sont *réellemen
 à calculer). Premiere les utilise pour le montage, et l'**export utilise toujours les rushs originaux**
 en pleine qualité.
 
-### 1. Créer le préréglage (une seule fois, 2 minutes)
+### Utilisation
 
-Dans **Adobe Media Encoder** :
-1. Panneau *Navigateur de préréglages* → bouton **+** → **Créer un préréglage d'encodage**.
-2. Nom : `Proxy vertical 1080x1920` · Format : **QuickTime** · Préréglage de base : **Apple ProRes 422 Proxy**.
-3. Onglet *Vidéo* : décoche la case de correspondance de la taille d'image, puis **Largeur 1080**,
-   **Hauteur 1920** (ou 540 × 960 pour un ordinateur moins puissant). Laisse la cadence « identique à la source ».
-4. OK. Puis clic droit sur le préréglage → **Exporter le préréglage…** → enregistre le fichier `.epr`
-   où tu veux (ex. dans ton dossier Documents).
-
-### 2. Dans le plugin
-
-1. Section *Proxys verticaux* → **Choisir le préréglage…** → sélectionne le `.epr` exporté.
-2. Sélectionne des rushs tournés (ou des chutiers) → **Créer les proxys de la sélection**.
+1. Sélectionne des rushs tournés (ou des chutiers) → **Créer les proxys de la sélection**.
    Ou coche **Créer les proxys après chaque rotation** pour que ce soit automatique.
-3. Media Encoder encode en arrière-plan ; chaque proxy est **attaché automatiquement** à son clip dès qu'il
-   est terminé (même si tu fermes le panneau entre-temps).
+2. La toute première fois, le plugin **prépare lui-même le préréglage Media Encoder** (environ 30 s) :
+   il part du préréglage « Apple ProRes 422 Proxy » installé avec Media Encoder, le passe en vertical à la
+   taille choisie (720×1280 par défaut ; 540×960 ou 1080×1920 au choix), en gardant la cadence de la
+   source, puis le **vérifie par un encodage test d'une seconde**. Il est ensuite réutilisé.
+3. Media Encoder encode en arrière-plan ; chaque proxy est **vérifié** (vertical, même format et même
+   cadence que le rush) puis **attaché automatiquement** à son clip (même si tu fermes le panneau
+   entre-temps).
 4. Dans le moniteur source/programme, active le bouton **Activer/désactiver les proxys** (ajoute-le via le
    bouton « + » du moniteur s'il n'est pas affiché).
+
+Media Encoder doit être installé (il l'est avec Creative Cloud quand Premiere l'est, sinon : application
+Creative Cloud > Media Encoder > Installer).
+
+### En secours : préréglage manuel
+
+Si la préparation automatique échoue, crée le préréglage dans Media Encoder : *Navigateur de préréglages*
+→ **+** → **Créer un préréglage d'encodage** · Format **QuickTime** · base **Apple ProRes 422 Proxy** ·
+onglet *Vidéo* : décoche « identique à la source » pour la taille, mets **720 × 1280**, laisse la cadence
+identique à la source · OK · clic droit → **Exporter le préréglage…**. Puis dans le plugin :
+**Choisir un préréglage manuel…** (et **Revenir à l'automatique** pour annuler ce choix).
 
 Les proxys sont rangés dans un dossier `Proxies` à côté des rushs (`C0001_Proxy_Vertical.mov`). Ce sont des
 fichiers légers, que tu peux supprimer à tout moment sans risque pour tes rushs.
@@ -159,6 +164,9 @@ plugin/
   src/mp4rotation.js   lecture/écriture de la matrice de rotation (indépendant de Premiere)
   src/premiere.js      sélection du panneau Projet, chutiers, rafraîchissement des clips
   src/settings.js      préférences et historique (annulation)
-  src/proxies.js       proxys verticaux via Media Encoder, attachement automatique
+  src/proxies.js       proxys verticaux via Media Encoder, vérification et attachement automatique
+  src/presets.js       création et vérification automatiques du préréglage Media Encoder vertical
+  src/inflate.js       décompression gzip (certains préréglages Adobe sont compressés)
+  assets/calibration.mp4  vidéo de 1 s (4 Ko) pour l'encodage test du préréglage
   test/                tests Node + ffmpeg
 ```

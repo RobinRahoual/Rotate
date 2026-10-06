@@ -45,12 +45,21 @@
 
         <div class="section">
           <sp-detail>PROXYS VERTICAUX (LECTURE FLUIDE)</sp-detail>
-          <sp-body size="XS" class="muted">Préréglage : <span id="preset-name">aucun</span></sp-body>
           <div class="row">
-            <sp-action-button id="choose-preset">Choisir le préréglage…</sp-action-button>
             <sp-action-button id="make-proxies">Créer les proxys de la sélection</sp-action-button>
           </div>
           <sp-checkbox id="opt-auto-proxy">Créer les proxys après chaque rotation</sp-checkbox>
+          <sp-body size="XS" class="muted label">Taille des proxys</sp-body>
+          <sp-radio-group id="proxy-size">
+            <sp-radio value="540x960">540×960</sp-radio>
+            <sp-radio value="720x1280">720×1280</sp-radio>
+            <sp-radio value="1080x1920">1080×1920</sp-radio>
+          </sp-radio-group>
+          <sp-body size="XS" class="muted label">Préréglage Media Encoder : <span id="preset-name">automatique</span></sp-body>
+          <div class="row">
+            <sp-action-button id="choose-preset" quiet>Choisir un préréglage manuel…</sp-action-button>
+            <sp-action-button id="auto-preset" quiet>Revenir à l'automatique</sp-action-button>
+          </div>
           <sp-body size="XS" id="proxy-status" class="muted"></sp-body>
         </div>
 

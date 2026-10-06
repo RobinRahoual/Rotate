@@ -6,7 +6,9 @@ const fs = require("fs");
 const premiere = require("./src/premiere.js");
 const rotation = require("./src/mp4rotation.js");
 const settings = require("./src/settings.js");
-const { createProxyQueue } = require("./src/proxies.js");
+const { createProxyQueue, waitForCompleteFile } = require("./src/proxies.js");
+const presets = require("./src/presets.js");
+const os = require("os");
 
 const MAX_LOG_LINES = 300;
 
@@ -333,10 +335,24 @@ const proxies = createProxyQueue({
   },
 });
 
+function proxySize() {
+  const value = settings.getString(storage, "proxySize");
+  return presets.SIZES[value] ? value : presets.DEFAULT_SIZE;
+}
+
 function renderPreset() {
+  const manual = settings.getString(storage, "proxyPresetMode") === "manual";
   const preset = settings.getString(storage, "proxyPreset");
-  const name = preset ? preset.split(/[\\/]/).pop() : "aucun";
-  $("preset-name").textContent = name;
+  if (manual && preset) {
+    $("preset-name").textContent = `manuel (${preset.split(/[\\/]/).pop()})`;
+  } else if (preset && settings.getString(storage, "proxyPresetSize") === proxySize()) {
+    $("preset-name").textContent = "automatique, prêt";
+  } else {
+    $("preset-name").textContent = "automatique (préparé au premier usage)";
+  }
+  if (manual) $("auto-preset").classList.remove("hidden");
+  else $("auto-preset").classList.add("hidden");
+  document.querySelectorAll("#proxy-size sp-radio").forEach((radio) => setChecked(radio, radio.getAttribute("value") === proxySize()));
 }
 
 let picking = false;
@@ -347,8 +363,9 @@ async function choosePreset() {
     const file = await uxpStorage.localFileSystem.getFileForOpening({ types: ["epr"] });
     if (file && file.nativePath) {
       settings.setString(storage, "proxyPreset", file.nativePath);
+      settings.setString(storage, "proxyPresetMode", "manual");
       renderPreset();
-      log(`Préréglage de proxy : ${file.name}`, "ok");
+      log(`Préréglage de proxy manuel : ${file.name}`, "ok");
     }
   } catch (e) {
     log(`Sélection du préréglage impossible : ${errorMessage(e)}`, "error");
@@ -357,13 +374,74 @@ async function choosePreset() {
   }
 }
 
-async function startProxies(entries) {
+function backToAutoPreset() {
+  settings.setString(storage, "proxyPresetMode", "auto");
+  settings.setString(storage, "proxyPreset", "");
+  renderPreset();
+}
+
+async function fileExists(path) {
+  try {
+    await fs.lstat(path);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function trimSep(path) {
+  return String(path).replace(/[\\/]+$/, "");
+}
+
+/*
+ * Renvoie le chemin du préréglage à utiliser. En mode automatique, le crée
+ * (et le vérifie par un encodage test d'une seconde) la première fois ou
+ * quand la taille choisie change.
+ */
+async function ensureProxyPreset() {
   const preset = settings.getString(storage, "proxyPreset");
-  if (!preset) {
-    log("Proxys : choisis d'abord un préréglage vertical (.epr), voir le README.", "warn");
+  if (settings.getString(storage, "proxyPresetMode") === "manual" && preset) return preset;
+  if (preset && settings.getString(storage, "proxyPresetSize") === proxySize() && (await fileExists(preset))) return preset;
+
+  setSummary("Préparation du préréglage vertical (une seule fois, environ 30 s)…");
+  const platform = os.platform();
+  const sep = platform === "darwin" ? "/" : "\\";
+  const { localFileSystem } = uxpStorage;
+  const dataFolder = trimSep((await localFileSystem.getDataFolder()).nativePath);
+  const pluginFolder = trimSep((await localFileSystem.getPluginFolder()).nativePath);
+  const manager = ppro.EncoderManager.getManager();
+  const fileDeps = { fs, rotation, withFile: premiere.withFile };
+  const result = await presets.createVerticalPreset(
+    {
+      fs,
+      platform,
+      dataFolder,
+      calibrationFile: `${pluginFolder}${sep}assets${sep}calibration.mp4`,
+      rotation,
+      withFile: premiere.withFile,
+      log,
+      encodeTest: (input, output, presetPath) =>
+        manager.encodeFile(input, output, presetPath, ppro.TickTime.createWithSeconds(0), ppro.TickTime.createWithSeconds(1), 0, true, true),
+      waitForFile: (path, timeout) => waitForCompleteFile(fileDeps, path, timeout),
+    },
+    proxySize()
+  );
+  settings.setString(storage, "proxyPreset", result.path);
+  settings.setString(storage, "proxyPresetSize", result.size);
+  settings.setString(storage, "proxyPresetMode", "auto");
+  renderPreset();
+  return result.path;
+}
+
+async function startProxies(entries) {
+  if (!entries.length) return 0;
+  let preset;
+  try {
+    preset = await ensureProxyPreset();
+  } catch (e) {
+    log(`Proxys : ${errorMessage(e)}`, "error");
     return 0;
   }
-  if (!entries.length) return 0;
   const queued = await proxies.create(entries, preset);
   if (queued) log(`${queued} proxy(s) envoyé(s) à Media Encoder.`, "ok");
   return queued;
@@ -419,6 +497,11 @@ $("default-choice").addEventListener("change", (event) => {
 $("opt-preview").addEventListener("change", (e) => settings.setBool(storage, "preview", e.target.checked));
 $("opt-auto-proxy").addEventListener("change", (e) => settings.setBool(storage, "autoProxy", e.target.checked));
 $("choose-preset").addEventListener("click", choosePreset);
+$("auto-preset").addEventListener("click", backToAutoPreset);
+$("proxy-size").addEventListener("change", (event) => {
+  settings.setString(storage, "proxySize", event.target.value);
+  renderPreset();
+});
 $("make-proxies").addEventListener("click", makeProxiesForSelection);
 
 document.querySelectorAll("[data-rotation]").forEach((button) => {
