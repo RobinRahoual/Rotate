@@ -31,18 +31,19 @@ const uxpFs = {
 // --- Faux Premiere ---
 const TYPE = { CLIP: 1, BIN: 2, ROOT: 3, FILE: 4 };
 const refreshed = [];
-function clip(name, mediaPath, opts = {}) {
+let pathCalls = 0;
+function clip(name, mediaPath) {
   return {
     name, type: TYPE.CLIP,
-    async isSequence() { return !!opts.sequence; },
-    async isOffline() { return !!opts.offline; },
-    async getMediaFilePath() { return mediaPath; },
+    async getMediaFilePath() { pathCalls++; return mediaPath; },
     async refreshMedia() { refreshed.push(name); return true; },
     async changeMediaFilePath() { return true; },
   };
 }
+let binIds = 0;
 function bin(name, items) {
-  return { name, type: TYPE.BIN, async getItems() { return items; } };
+  const id = `bin-${++binIds}`;
+  return { name, type: TYPE.BIN, getId: () => id, async getItems() { return items; } };
 }
 let selection = [];
 const ppro = {
@@ -77,37 +78,65 @@ async function rotationOf(file) {
   try { return await rotation.getRotation(io); } finally { fs.closeSync(fd); }
 }
 
-test("Sélection mixte : clips, chutier imbriqué, doublon, séquence, hors ligne, MXF", async () => {
+test("Sélection mixte : clips, chutiers imbriqués, doublons, séquence, hors ligne, MXF", async () => {
   const a = makeVideo("C0001.MP4");
   const b = makeVideo("C0002.MP4");
   const c = makeVideo("C0003.MP4");
+  const jour2 = bin("Jour 2", [clip("C0003", c)]);
   selection = [
     clip("C0001", a),
-    bin("Rushs vertical", [clip("C0002", b), bin("Jour 2", [clip("C0003", c)]), clip("C0001 copie", a)]),
-    clip("Séquence 01", "", { sequence: true }),
-    clip("Absent", "/nope.mp4", { offline: true }),
+    bin("Rushs vertical", [clip("C0002", b), jour2, clip("C0001 copie", a)]),
+    jour2, // chutier sélectionné en même temps que son parent
+    clip("Séquence 01", ""),
+    clip("Absent", path.join(tmp, "absent.mp4")),
     clip("Autre caméra", "/x/clip.mxf"),
   ];
   const logs = [];
-  const res = await rotateSelection(90, (m, l) => logs.push(`[${l}] ${m}`));
-  assert.deepStrictEqual(res, { done: 3, unchanged: 0, failed: 0 }, logs.join("\n"));
+  const progress = [];
+  const res = await rotateSelection(90, {
+    log: (m, l) => logs.push(`[${l}] ${m}`),
+    onProgress: (done, total) => progress.push([done, total]),
+  });
+  assert.strictEqual(res.done, 3, logs.join("\n"));
+  assert.strictEqual(res.failed, 1, logs.join("\n"));
   for (const f of [a, b, c]) assert.strictEqual(await rotationOf(f), 90);
-  assert.deepStrictEqual(refreshed.sort(), ["C0001", "C0001 copie", "C0002", "C0003"]);
-  assert.ok(logs.some((l) => l.includes("Absent") && l.includes("hors ligne")));
+  // Un seul rafraîchissement par fichier, et un seul appel API par clip pour la collecte.
+  assert.deepStrictEqual(refreshed.sort(), ["C0001", "C0002", "C0003"]);
+  assert.strictEqual(pathCalls, 7);
+  assert.ok(logs.some((l) => l.includes("Absent") && l.includes("introuvable")), logs.join("\n"));
   assert.ok(logs.some((l) => l.includes("Autre caméra") && l.includes("non pris en charge")));
+  assert.ok(logs.some((l) => l.includes("1 élément(s) partagent un fichier")));
+  assert.deepStrictEqual(progress[progress.length - 1], [4, 4]);
+  assert.ok(res.timings.files >= 0 && res.timings.refresh >= 0);
 
-  // Deuxième passage : rien ne change.
-  const again = await rotateSelection(90, () => {});
-  assert.deepStrictEqual(again, { done: 0, unchanged: 3, failed: 0 });
+  // Deuxième passage : aucun fichier réécrit, aucun rafraîchissement.
+  refreshed.length = 0;
+  const mtimes = [a, b, c].map((f) => fs.statSync(f).mtimeMs);
+  const again = await rotateSelection(90);
+  assert.strictEqual(again.done, 0);
+  assert.strictEqual(again.unchanged, 3);
+  assert.deepStrictEqual(refreshed, []);
+  assert.deepStrictEqual([a, b, c].map((f) => fs.statSync(f).mtimeMs), mtimes);
 
   // Retour à l'horizontale.
-  await rotateSelection(0, () => {});
+  await rotateSelection(0);
   for (const f of [a, b, c]) assert.strictEqual(await rotationOf(f), 0);
+});
+
+test("Annulation : s'arrête proprement entre deux clips", async () => {
+  const files = ["D1.MP4", "D2.MP4", "D3.MP4"].map(makeVideo);
+  selection = files.map((f, i) => clip(`D${i + 1}`, f));
+  let calls = 0;
+  const res = await rotateSelection(270, { isCancelled: () => ++calls > 1 });
+  assert.strictEqual(res.cancelled, true);
+  assert.strictEqual(res.done, 1);
+  assert.strictEqual(await rotationOf(files[0]), 270);
+  assert.strictEqual(await rotationOf(files[1]), 0);
 });
 
 test("Sélection vide : message explicite", async () => {
   selection = [];
-  await assert.rejects(rotateSelection(90, () => {}), /Sélectionne des rushs/);
+  await assert.rejects(rotateSelection(90), /Sélectionne des rushs/);
 });
 
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

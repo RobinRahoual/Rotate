@@ -1,7 +1,7 @@
 {
   "id": "fr.robinrahoual.rotate",
   "name": "Rotate",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "main": "index.html",
   "manifestVersion": 5,
   "host": { "app": "premierepro", "minVersion": "25.6.0" },
@@ -13,9 +13,19 @@
       "type": "panel",
       "id": "rotatePanel",
       "label": { "default": "Rotate" },
-      "minimumSize": { "width": 240, "height": 220 },
-      "preferredDockedSize": { "width": 280, "height": 360 },
-      "preferredFloatingSize": { "width": 320, "height": 420 }
+      "minimumSize": { "width": 180, "height": 120 },
+      "preferredDockedSize": { "width": 260, "height": 420 },
+      "preferredFloatingSize": { "width": 300, "height": 480 }
+    },
+    {
+      "type": "command",
+      "id": "rotateDefault",
+      "label": { "default": "Tourner la sélection en vertical (sens par défaut)" }
+    },
+    {
+      "type": "command",
+      "id": "rotateReset",
+      "label": { "default": "Remettre la sélection à l'horizontale" }
     }
   ]
 }

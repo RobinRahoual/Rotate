@@ -33,21 +33,47 @@ Prérequis : **Premiere Pro 25.6 ou plus récent** et l'application **UXP Develo
 
 1. Dans le panneau **Projet**, sélectionne un ou plusieurs rushs **ou des chutiers entiers**
    (les sous-chutiers sont parcourus aussi).
-2. Clique sur **Tourner en vertical** : la rotation se fait dans ton **sens par défaut**.
+2. Clique sur **Tourner en vertical** (en haut du panneau, toujours visible) : la rotation se fait
+   dans ton **sens par défaut**. Une barre de progression et un bouton **Annuler** s'affichent pendant
+   le traitement.
 
 ### Sens par défaut
 
-Sous le bouton principal, choisis une fois pour toutes le sens qui correspond à ta façon de tenir la
-caméra : **↺ -90°** (anti-horaire, réglage initial), **↻ +90°** (horaire) ou **180°**. Le choix est
-mémorisé : il est conservé quand tu fermes le panneau ou Premiere.
+Choisis une fois pour toutes le sens qui correspond à ta façon de tenir la caméra : **↺ -90°**
+(anti-horaire, réglage initial), **↻ +90°** (horaire) ou **180°**. Le choix est mémorisé.
 
-### Autres actions
+### Autre sens, ponctuellement
 
-Les boutons du bas servent ponctuellement :
 - **↺ -90°**, **↻ +90°** ou **180°** pour un rush filmé dans un autre sens que d'habitude ;
 - **Horizontal d'origine** pour annuler.
 
 Les rotations sont *absolues* : recliquer sur le même bouton ne tourne pas une deuxième fois.
+
+### Sans ouvrir le panneau : le menu
+
+*Fenêtre > Plugins UXP > Rotate* propose aussi :
+- **Tourner la sélection en vertical (sens par défaut)**
+- **Remettre la sélection à l'horizontale**
+
+Lancées depuis le menu, ces actions sont silencieuses si tout va bien ; une fenêtre s'affiche seulement
+en cas de problème.
+
+### Garder le panneau sous la main
+
+Plutôt que de laisser le panneau flottant (une fenêtre flottante réduite est facile à perdre), **ancre-le**
+dans l'interface : fais glisser son onglet (le titre « Rotate », pas le bord de la fenêtre) à côté du
+panneau Projet jusqu'à voir la zone bleue d'ancrage. Puis *Fenêtre > Espaces de travail > Enregistrer les
+modifications* pour qu'il soit toujours là. S'il a disparu : *Fenêtre > Plugins UXP > Rotate*.
+
+## Performances
+
+- Le plugin ne lit que quelques centaines d'octets par rush (les en-têtes utiles), quelle que soit la
+  durée du clip, et n'écrit que 36 octets.
+- Un rush déjà dans le bon sens n'est ni réécrit ni actualisé dans Premiere.
+- Chaque fichier n'est actualisé qu'une fois, même s'il apparaît plusieurs fois dans le projet.
+- Les actualisations sont faites une par une avec une courte pause, pour que Premiere reste réactif.
+- À la fin, le journal affiche le temps passé dans chaque étape (sélection, fichiers, actualisation
+  Premiere) : utile pour savoir d'où vient une lenteur.
 
 ## À savoir
 

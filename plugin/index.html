@@ -5,28 +5,49 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <p class="hint">Sélectionne des rushs (ou des chutiers) dans le panneau Projet, puis :</p>
+    <div class="panel">
+      <div class="header">
+        <sp-button id="rotate-default" variant="cta">Tourner en vertical</sp-button>
+        <div id="progress" class="progress hidden">
+          <sp-progressbar id="progress-bar" max="100" value="0" size="small">
+            <sp-label slot="label" id="progress-label">Traitement…</sp-label>
+          </sp-progressbar>
+          <sp-action-button id="cancel" quiet>Annuler</sp-action-button>
+        </div>
+        <sp-body size="XS" id="summary" class="summary">Sélectionne des rushs ou des chutiers dans le panneau Projet.</sp-body>
+      </div>
 
-    <sp-button id="rotate-default" class="main" variant="cta">Tourner en vertical</sp-button>
+      <div class="scroll">
+        <div class="section">
+          <sp-detail>SENS PAR DÉFAUT</sp-detail>
+          <sp-radio-group id="default-choice" column>
+            <sp-radio value="270">↺ -90° (anti-horaire)</sp-radio>
+            <sp-radio value="90">↻ +90° (horaire)</sp-radio>
+            <sp-radio value="180">180°</sp-radio>
+          </sp-radio-group>
+        </div>
 
-    <sp-radio-group id="default-choice" column>
-      <sp-label slot="label">Sens par défaut</sp-label>
-      <sp-radio value="270">↺ -90° (anti-horaire)</sp-radio>
-      <sp-radio value="90">↻ +90° (horaire)</sp-radio>
-      <sp-radio value="180">180°</sp-radio>
-    </sp-radio-group>
+        <div class="section">
+          <sp-detail>AUTRE SENS, PONCTUELLEMENT</sp-detail>
+          <div class="row">
+            <sp-action-button data-rotation="270">↺ -90°</sp-action-button>
+            <sp-action-button data-rotation="90">↻ +90°</sp-action-button>
+            <sp-action-button data-rotation="180">180°</sp-action-button>
+          </div>
+          <div class="row">
+            <sp-action-button data-rotation="0">Horizontal d'origine</sp-action-button>
+          </div>
+        </div>
 
-    <sp-divider size="small"></sp-divider>
-
-    <p class="hint">Ponctuellement, un autre sens :</p>
-    <div class="actions">
-      <sp-button data-rotation="270" variant="secondary">↺ -90°</sp-button>
-      <sp-button data-rotation="90" variant="secondary">↻ +90°</sp-button>
-      <sp-button data-rotation="180" variant="secondary">180°</sp-button>
-      <sp-button data-rotation="0" variant="secondary">Horizontal d'origine</sp-button>
+        <div class="section">
+          <div class="section-title">
+            <sp-detail>JOURNAL</sp-detail>
+            <sp-action-button id="clear-log" quiet>Effacer</sp-action-button>
+          </div>
+          <div id="log" class="log"></div>
+        </div>
+      </div>
     </div>
-
-    <div id="log" class="log"></div>
     <script src="main.js"></script>
   </body>
 </html>

@@ -118,12 +118,35 @@ test("Fichier qui n'est pas un MP4 : erreur claire, fichier intact", async () =>
   assert.strictEqual(sha(file), before);
 });
 
-test("isSupportedPath / addRotation", () => {
+test("isSupportedPath", () => {
   assert.ok(rotation.isSupportedPath("C:\\Rushs\\C0001.MP4"));
   assert.ok(rotation.isSupportedPath("/Volumes/SD/clip.mov"));
   assert.ok(!rotation.isSupportedPath("/Volumes/SD/clip.mxf"));
-  assert.strictEqual(rotation.addRotation(270, 90), 0);
-  assert.strictEqual(rotation.addRotation(0, -90), 270);
+});
+
+test("Lecture minimale : quelques centaines d'octets lus, quelle que soit la durée du rush", async () => {
+  const file = makeVideo("long.mp4");
+  let bytesRead = 0;
+  let reads = 0;
+  const io = nodeIo(file);
+  const counting = {
+    size: io.size,
+    read: async (p, l) => { reads++; bytesRead += l; return io.read(p, l); },
+    write: io.write,
+  };
+  try {
+    const plan = await rotation.planRotation(counting, 90);
+    assert.strictEqual(plan.writes.length, 1);
+    assert.strictEqual(plan.writes[0].bytes.length, 36);
+  } finally { io.close(); }
+  assert.ok(bytesRead < 2048, `${bytesRead} octets lus en ${reads} lectures`);
+});
+
+test("planRotation ne modifie jamais le fichier", async () => {
+  const file = makeVideo("plan.mp4");
+  const before = sha(file);
+  await withIo(file, (io) => rotation.planRotation(io, 270));
+  assert.strictEqual(sha(file), before);
 });
 
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

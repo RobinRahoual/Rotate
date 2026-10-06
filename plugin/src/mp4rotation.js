@@ -10,6 +10,10 @@
  *   - est instantané, même sur un rush 4K de plusieurs Go,
  *   - est réversible à 100 % (rotation 0 = matrice d'origine).
  *
+ * Pour rester léger (cartes SD, disques réseau), on ne lit que les en-têtes des
+ * boîtes utiles (quelques dizaines d'octets à chaque fois) au lieu de charger
+ * tout l'index "moov" du fichier.
+ *
  * Ce module ne dépend ni de Premiere ni de Node : il travaille sur un objet
  * "io" qui expose read/write/size. On peut donc le tester en dehors de Premiere.
  *
@@ -22,11 +26,10 @@
 
 const SUPPORTED_EXTENSIONS = [".mp4", ".mov", ".m4v"];
 
-// Le moov d'un rush caméra fait quelques centaines de Ko à quelques Mo.
-// Au-delà, on préfère refuser plutôt que de charger un fichier aberrant en mémoire.
-const MAX_MOOV_SIZE = 256 * 1024 * 1024;
-
 const ROTATIONS = [0, 90, 180, 270];
+
+// Garde-fou contre les fichiers corrompus (boucle infinie sur des boîtes vides).
+const MAX_BOXES_PER_LEVEL = 10000;
 
 function isSupportedPath(path) {
   const lower = String(path).toLowerCase();
@@ -37,68 +40,50 @@ function fourcc(bytes, offset) {
   return String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
 }
 
-function readUint64(view, offset) {
-  const high = view.getUint32(offset);
-  const low = view.getUint32(offset + 4);
-  return high * 0x100000000 + low;
+function viewOf(bytes) {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
-/*
- * Parcourt les boîtes (atoms) contenues dans bytes[start, end[.
- * Retourne [{ type, start, headerSize, end }] où start/end sont relatifs à bytes.
- */
-function listBoxes(bytes, start, end) {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const boxes = [];
+/* Lit l'en-tête de la boîte qui commence à `pos` (sans dépasser `end`). */
+async function readBoxHeader(io, pos, end) {
+  if (pos + 8 > end) return null;
+  const header = await io.read(pos, Math.min(16, end - pos));
+  const view = viewOf(header);
+  let size = view.getUint32(0);
+  const type = fourcc(header, 4);
+  let headerSize = 8;
+  if (size === 1) {
+    if (header.length < 16) throw new Error(`Structure MP4 invalide (boîte "${type}" tronquée).`);
+    size = view.getUint32(8) * 0x100000000 + view.getUint32(12);
+    headerSize = 16;
+  } else if (size === 0) {
+    size = end - pos;
+  }
+  if (size < headerSize || pos + size > end) {
+    throw new Error(`Structure MP4 invalide (boîte "${type}" corrompue).`);
+  }
+  return { type, start: pos, headerSize, end: pos + size };
+}
+
+/* Cherche les boîtes de type `types` entre start et end (un seul niveau). */
+async function findBoxes(io, start, end, types, firstOnly) {
+  const found = [];
   let pos = start;
-  while (pos + 8 <= end) {
-    let size = view.getUint32(pos);
-    const type = fourcc(bytes, pos + 4);
-    let headerSize = 8;
-    if (size === 1) {
-      if (pos + 16 > end) break;
-      size = readUint64(view, pos + 8);
-      headerSize = 16;
-    } else if (size === 0) {
-      size = end - pos;
+  for (let n = 0; n < MAX_BOXES_PER_LEVEL; n++) {
+    const box = await readBoxHeader(io, pos, end);
+    if (!box) break;
+    if (types.includes(box.type)) {
+      found.push(box);
+      if (firstOnly) break;
     }
-    if (size < headerSize || pos + size > end) {
-      throw new Error(`Structure MP4 invalide (boîte "${type}" corrompue).`);
-    }
-    boxes.push({ type, start: pos, headerSize, end: pos + size });
-    pos += size;
+    pos = box.end;
   }
-  return boxes;
+  return found;
 }
 
-function findChild(bytes, parent, type) {
-  return listBoxes(bytes, parent.start + parent.headerSize, parent.end).find((b) => b.type === type);
-}
-
-/* Localise la boîte "moov" en ne lisant que les en-têtes des boîtes de premier niveau. */
-async function locateMoov(io) {
-  const fileSize = await io.size();
-  let pos = 0;
-  while (pos + 8 <= fileSize) {
-    const header = await io.read(pos, Math.min(16, fileSize - pos));
-    const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
-    let size = view.getUint32(0);
-    const type = fourcc(header, 4);
-    if (size === 1) {
-      if (header.length < 16) break;
-      size = readUint64(view, 8);
-    } else if (size === 0) {
-      size = fileSize - pos;
-    }
-    if (size < 8) {
-      throw new Error(`Structure MP4 invalide à l'octet ${pos}.`);
-    }
-    if (type === "moov") {
-      return { position: pos, size };
-    }
-    pos += size;
-  }
-  throw new Error("Aucune boîte \"moov\" trouvée : ce fichier n'est pas un MP4/MOV lisible.");
+async function findChild(io, parent, type) {
+  const [box] = await findBoxes(io, parent.start + parent.headerSize, parent.end, [type], true);
+  return box || null;
 }
 
 /*
@@ -106,35 +91,37 @@ async function locateMoov(io) {
  * de leur matrice, ainsi que leur largeur/hauteur stockées dans le tkhd.
  */
 async function findVideoTracks(io) {
-  const moovInfo = await locateMoov(io);
-  if (moovInfo.size > MAX_MOOV_SIZE) {
-    throw new Error("En-tête \"moov\" anormalement volumineux, fichier ignoré.");
+  const fileSize = await io.size();
+  const [moov] = await findBoxes(io, 0, fileSize, ["moov"], true);
+  if (!moov) {
+    throw new Error("Aucune boîte \"moov\" trouvée : ce fichier n'est pas un MP4/MOV lisible.");
   }
-  const moovBytes = await io.read(moovInfo.position, moovInfo.size);
-  const view = new DataView(moovBytes.buffer, moovBytes.byteOffset, moovBytes.byteLength);
-  const moov = listBoxes(moovBytes, 0, moovBytes.length)[0];
 
   const tracks = [];
-  for (const trak of listBoxes(moovBytes, moov.start + moov.headerSize, moov.end)) {
-    if (trak.type !== "trak") continue;
+  for (const trak of await findBoxes(io, moov.start + moov.headerSize, moov.end, ["trak"], false)) {
+    const children = await findBoxes(io, trak.start + trak.headerSize, trak.end, ["tkhd", "mdia"], false);
+    const tkhd = children.find((b) => b.type === "tkhd");
+    const mdia = children.find((b) => b.type === "mdia");
+    if (!tkhd || !mdia) continue;
 
-    const mdia = findChild(moovBytes, trak, "mdia");
-    const hdlr = mdia && findChild(moovBytes, mdia, "hdlr");
     // hdlr : version/flags (4) + pre_defined (4) + handler_type (4)
-    if (!hdlr || fourcc(moovBytes, hdlr.start + hdlr.headerSize + 8) !== "vide") continue;
+    const hdlr = await findChild(io, mdia, "hdlr");
+    if (!hdlr || hdlr.end - hdlr.start < hdlr.headerSize + 12) continue;
+    const handler = await io.read(hdlr.start + hdlr.headerSize + 8, 4);
+    if (fourcc(handler, 0) !== "vide") continue;
 
-    const tkhd = findChild(moovBytes, trak, "tkhd");
-    if (!tkhd) continue;
-    const content = tkhd.start + tkhd.headerSize;
-    const version = moovBytes[content];
+    const tkhdBytes = await io.read(tkhd.start, tkhd.end - tkhd.start);
+    const content = tkhd.headerSize;
+    const version = tkhdBytes[content];
     // version 0 : dates/durée sur 32 bits (20 octets), version 1 : sur 64 bits (32 octets)
     // puis reserved(8) + layer(2) + alternate_group(2) + volume(2) + reserved(2) = 16 octets
     const matrixOffset = content + 4 + (version === 1 ? 32 : 20) + 16;
-    if (matrixOffset + 36 + 8 > tkhd.end) {
+    if (matrixOffset + 36 + 8 > tkhdBytes.length) {
       throw new Error("En-tête de piste \"tkhd\" tronqué.");
     }
+    const view = viewOf(tkhdBytes);
     tracks.push({
-      matrixPosition: moovInfo.position + matrixOffset,
+      matrixPosition: tkhd.start + matrixOffset,
       matrix: readMatrix(view, matrixOffset),
       width: view.getUint32(matrixOffset + 36) / 65536,
       height: view.getUint32(matrixOffset + 40) / 65536,
@@ -203,25 +190,30 @@ async function getRotation(io) {
 }
 
 /*
- * Applique une rotation absolue (0, 90, 180 ou 270 degrés, sens horaire).
- * Retourne { previous, rotation, changed }.
+ * Prépare une rotation absolue (0, 90, 180 ou 270 degrés, sens horaire) en
+ * lecture seule. Retourne { previous, rotation, writes } : `writes` est vide si
+ * le fichier est déjà dans le bon sens (aucune écriture nécessaire).
  */
-async function setRotation(io, degrees) {
+async function planRotation(io, degrees) {
   const tracks = await findVideoTracks(io);
-  const previous = matrixToRotation(tracks[0].matrix);
-  let changed = false;
+  const writes = [];
   for (const track of tracks) {
     const target = buildMatrix(degrees, track.width, track.height);
     if (target.every((v, i) => v === track.matrix[i])) continue;
-    await io.write(track.matrixPosition, encodeMatrix(target));
-    changed = true;
+    writes.push({ position: track.matrixPosition, bytes: encodeMatrix(target) });
   }
-  return { previous, rotation: degrees, changed };
+  return { previous: matrixToRotation(tracks[0].matrix), rotation: degrees, writes };
 }
 
-/* Rotation suivante quand on tourne de `delta` degrés à partir de `current`. */
-function addRotation(current, delta) {
-  return ((((current || 0) + delta) % 360) + 360) % 360;
+async function applyPlan(io, plan) {
+  for (const { position, bytes } of plan.writes) await io.write(position, bytes);
+}
+
+/* Raccourci lecture + écriture sur le même accès fichier. Retourne { previous, rotation, changed }. */
+async function setRotation(io, degrees) {
+  const plan = await planRotation(io, degrees);
+  await applyPlan(io, plan);
+  return { previous: plan.previous, rotation: degrees, changed: plan.writes.length > 0 };
 }
 
 module.exports = {
@@ -229,8 +221,9 @@ module.exports = {
   SUPPORTED_EXTENSIONS,
   isSupportedPath,
   getRotation,
+  planRotation,
+  applyPlan,
   setRotation,
-  addRotation,
   // exportés pour les tests
   buildMatrix,
   matrixToRotation,
