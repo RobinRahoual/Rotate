@@ -176,13 +176,27 @@ Le préréglage des proxys est recréé automatiquement s'il ne fonctionne plus.
 
 ## Performances
 
-- Le plugin ne lit que quelques centaines d'octets par rush (les en-têtes utiles), quelle que soit la
-  durée du clip, et n'écrit que 36 octets.
-- Un rush déjà dans le bon sens n'est ni réécrit ni actualisé dans Premiere.
+- Le plugin ne lit que les en-têtes utiles de chaque rush, par blocs de 4 Ko : environ 6 lectures disque
+  par rush, quelle que soit sa durée, et seulement 36 octets écrits.
+- Chaque rush n'est ouvert qu'une fois en écriture (vérification et écriture sur le même accès) ; un rush
+  déjà dans le bon sens n'est ni réécrit ni actualisé dans Premiere.
 - Chaque fichier n'est actualisé qu'une fois, même s'il apparaît plusieurs fois dans le projet.
-- Les actualisations sont faites une par une avec une courte pause, pour que Premiere reste réactif.
+- Les actualisations sont faites une par une, avec une pause proportionnelle au temps que Premiere a mis
+  pour la précédente (entre 30 et 250 ms), pour que Premiere reste réactif.
+- Au-delà de 150 rushs, l'aperçu n'affiche que les 150 premiers (les autres sont inclus d'office) pour
+  s'ouvrir instantanément.
+- Le suivi des proxys ne relit un fichier que lorsqu'il a fini de grossir, et ne reparcourt le projet
+  qu'une fois par minute au plus si un rush est introuvable.
+- L'historique d'annulation est plafonné (10 opérations, ~1 Mo) et n'est relu que lorsqu'il change.
 - À la fin, le journal affiche le temps passé dans chaque étape (sélection, fichiers, actualisation
   Premiere) : utile pour savoir d'où vient une lenteur.
+
+## Sécurité des rushs
+
+- Rush sur une carte SD verrouillée ou un disque protégé : message clair, rien n'est modifié.
+- Rush verrouillé par Premiere (Windows) : le clip est mis hors ligne le temps de l'écriture, puis **toujours**
+  re-lié, même si l'écriture échoue.
+- Annulation : un rush modifié entre-temps par une autre opération n'est pas touché.
 
 ## À savoir
 

@@ -193,6 +193,7 @@ async function createVerticalPreset(deps, sizeKey) {
   const sep = deps.platform === "darwin" ? "/" : "\\";
   const ext = (t) => (/_4D6F6F56/i.test(t.path) ? ".mov" : ".mp4");
   const tried = [];
+  let produced = false; // Media Encoder a-t-il produit au moins un fichier test ?
 
   for (const template of templates.slice(0, 3)) {
     let xml;
@@ -222,14 +223,26 @@ async function createVerticalPreset(deps, sizeKey) {
       }
       const queued = await deps.encodeTest(deps.calibrationFile, testPath, presetPath);
       if (!queued || !(await deps.waitForFile(testPath, 180000))) {
+        // Rien du tout dès le premier essai : c'est Media Encoder qui ne répond pas, pas le préréglage.
+        if (!produced) {
+          throw new Error("Media Encoder n'a produit aucun fichier test en 3 minutes. Vérifie qu'il est installé et qu'il s'ouvre, puis réessaie (ou choisis un préréglage manuel).");
+        }
         tried.push(`${template.name} (essai ${i + 1}) : pas de fichier produit`);
         continue;
       }
-      const info = await deps.withFile(testPath, "r", (io) => deps.rotation.readVideoInfo(io));
+      produced = true;
+      let info;
       try {
-        await deps.fs.unlink(testPath);
+        info = await deps.withFile(testPath, "r", (io) => deps.rotation.readVideoInfo(io));
       } catch (e) {
-        // fichier test laissé dans le dossier du plugin, sans conséquence
+        tried.push(`${template.name} (essai ${i + 1}) : fichier test illisible`);
+        continue;
+      } finally {
+        try {
+          await deps.fs.unlink(testPath);
+        } catch (e) {
+          // fichier test laissé dans le dossier du plugin, sans conséquence
+        }
       }
       const sizeOk = info.displayWidth === size.width && info.displayHeight === size.height;
       const fpsOk = !!info.fps && Math.abs(info.fps - 25) < 0.01; // la vidéo test est à 25 i/s

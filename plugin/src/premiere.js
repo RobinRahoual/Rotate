@@ -8,8 +8,11 @@
  *   - un fichier déjà dans le bon sens n'est ni ouvert en écriture ni actualisé ;
  *   - chaque fichier n'est actualisé qu'une fois, même s'il apparaît plusieurs
  *     fois dans le projet ;
- *   - les actualisations sont faites une par une, avec une courte pause entre
- *     chaque, pour laisser Premiere respirer (lecture, interface).
+ *   - les actualisations sont faites une par une, avec une pause entre chaque
+ *     (proportionnelle au temps que Premiere a mis à actualiser le précédent)
+ *     pour lui laisser le temps de respirer (lecture, interface) ;
+ *   - chaque rush n'est ouvert qu'une fois en écriture (vérification + écriture
+ *     sur le même accès).
  */
 
 "use strict";
@@ -21,8 +24,14 @@ const { rotationLabel } = require("./settings.js");
 
 // Nombre d'appels simultanés à Premiere pendant la collecte des chemins.
 const COLLECT_CONCURRENCY = 8;
-// Pause entre deux actualisations de média (ms).
-const REFRESH_PAUSE_MS = 30;
+// Pause entre deux actualisations de média (ms) : la moitié du temps pris par
+// la précédente, entre ces deux bornes.
+const REFRESH_PAUSE_MIN_MS = 30;
+const REFRESH_PAUSE_MAX_MS = 250;
+
+function refreshPause(lastRefreshMs) {
+  return Math.min(REFRESH_PAUSE_MAX_MS, Math.max(REFRESH_PAUSE_MIN_MS, Math.round(lastRefreshMs / 2)));
+}
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -90,8 +99,14 @@ function isMissingFileError(e) {
   return /ENOENT|not found|no such file|introuvable/i.test(errorMessage(e));
 }
 
+// Fichier ouvert par Premiere (Windows : « sharing violation », remontée en EBUSY).
 function isLockedFileError(e) {
-  return /EBUSY|EPERM|EACCES|lock|busy|denied|sharing/i.test(errorMessage(e));
+  return /EBUSY|busy|lock|sharing/i.test(errorMessage(e));
+}
+
+// Fichier en lecture seule (carte SD verrouillée, disque protégé, droits insuffisants).
+function isReadOnlyError(e) {
+  return /EPERM|EACCES|EROFS|denied|read-only|permission/i.test(errorMessage(e));
 }
 
 /*
@@ -235,20 +250,28 @@ function setOffline(project, clip) {
 }
 
 /*
- * Écrit dans le fichier avec `writeFn(io)`. Si Premiere verrouille le fichier
- * (Windows), on met le clip hors ligne, on écrit, puis on le re-lie.
- * Retourne true si le clip a déjà été re-lié (donc relu) par Premiere.
+ * Ouvre le fichier en écriture et appelle `writeFn(io)`. Si Premiere verrouille
+ * le fichier (Windows), on met le clip hors ligne, on réessaie, puis on le
+ * re-lie dans tous les cas (même si l'écriture échoue : le clip ne doit jamais
+ * rester hors ligne). Retourne true si le clip a été re-lié (donc relu).
  */
 async function writeFile(project, entry, writeFn) {
   try {
     await withFile(entry.path, "r+", writeFn);
     return false;
   } catch (e) {
-    if (!isLockedFileError(e)) throw e;
+    if (isReadOnlyError(e)) throw new Error("fichier en lecture seule (carte SD verrouillée ou disque protégé ?)");
+    if (!isLockedFileError(e) || !entry.clip) throw e;
   }
   setOffline(project, entry.clip);
-  await withFile(entry.path, "r+", writeFn);
-  const relinked = await entry.clip.changeMediaFilePath(entry.path, true);
+  let writeError = null;
+  try {
+    await withFile(entry.path, "r+", writeFn);
+  } catch (e) {
+    writeError = e;
+  }
+  const relinked = await entry.clip.changeMediaFilePath(entry.path, true).catch(() => false);
+  if (writeError) throw writeError;
   if (!relinked) throw new Error("fichier modifié mais impossible de le re-lier : clic droit > Lier le média");
   return true;
 }
@@ -305,11 +328,14 @@ async function applyRotations(project, items, degrees, options = {}) {
     onProgress(i, todo.length, entry.name);
     try {
       let t = Date.now();
-      // Le fichier a pu changer depuis l'aperçu : on revérifie juste avant d'écrire.
-      const fresh = await withFile(entry.path, "r", (io) => rotation.planRotation(io, degrees));
-      if (!fresh.writes.length) continue;
-      const relinked = await writeFile(project, entry, (io) => rotation.applyPlan(io, fresh));
+      // Le fichier a pu changer depuis l'aperçu : on revérifie juste avant d'écrire, sur le même accès.
+      let fresh = null;
+      const relinked = await writeFile(project, entry, async (io) => {
+        fresh = await rotation.planRotation(io, degrees);
+        await rotation.applyPlan(io, fresh);
+      });
       result.timings.files += Date.now() - t;
+      if (!fresh.writes.length) continue;
       operation.files.push({
         path: entry.path,
         name: entry.name,
@@ -317,10 +343,12 @@ async function applyRotations(project, items, degrees, options = {}) {
       });
 
       let refreshed = relinked;
+      let refreshMs = 0;
       if (!refreshed) {
         t = Date.now();
         refreshed = await refreshMedia(entry);
-        result.timings.refresh += Date.now() - t;
+        refreshMs = Date.now() - t;
+        result.timings.refresh += refreshMs;
       }
       result.done++;
       if (refreshed) {
@@ -328,7 +356,7 @@ async function applyRotations(project, items, degrees, options = {}) {
       } else {
         log(`${entry.name} : fichier tourné, mais Premiere ne l'a pas actualisé (clic droit > Actualiser le média)`, "warn");
       }
-      if (i < todo.length - 1) await pause(REFRESH_PAUSE_MS);
+      if (i < todo.length - 1) await pause(refreshPause(refreshMs));
     } catch (e) {
       result.failed++;
       log(`${entry.name} : échec - ${describeError(e)}`, "error");
@@ -429,18 +457,23 @@ async function undoOperation(operation, options = {}) {
       }
       let outcome = "restored";
       const write = (io) => rotation.restoreBytes(io, file.changes).then((r) => (outcome = r));
-      const relinked = entry.clip ? await writeFile(project, entry, write) : (await withFile(file.path, "r+", write), false);
+      const relinked = await writeFile(project, entry, write);
       if (outcome !== "restored") {
         result.skipped++;
         continue;
       }
-      if (entry.clip && !relinked) await refreshMedia(entry);
+      let refreshMs = 0;
+      if (entry.clip && !relinked) {
+        const t = Date.now();
+        await refreshMedia(entry);
+        refreshMs = Date.now() - t;
+      }
       result.restored++;
       log(`${file.name} : rotation d'avant remise`, "ok");
       if (entry.clip && (await safeHasProxy(entry.clip))) {
         log(`${file.name} : son proxy est vertical, pense à le recréer ou à désactiver les proxys`, "warn");
       }
-      if (i < operation.files.length - 1) await pause(REFRESH_PAUSE_MS);
+      if (i < operation.files.length - 1) await pause(refreshPause(refreshMs));
     } catch (e) {
       result.failed++;
       log(`${file.name} : échec - ${describeError(e)}`, "error");
@@ -469,4 +502,5 @@ module.exports = {
   withFile,
   mapLimit,
   pause,
+  refreshPause,
 };

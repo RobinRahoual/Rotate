@@ -14,8 +14,14 @@ const Module = require("node:module");
 const { execFileSync } = require("node:child_process");
 
 // --- Imitation de l'API fs de UXP (promesses, ArrayBuffer) ---
+// failOpen(path, flag) peut renvoyer une erreur à lever (simulation de verrou / lecture seule).
+let failOpen = () => null;
 const uxpFs = {
-  async open(p, flag) { return fs.openSync(p, flag); },
+  async open(p, flag) {
+    const err = failOpen(p, flag);
+    if (err) throw new Error(err);
+    return fs.openSync(p, flag);
+  },
   async close(fd) { fs.closeSync(fd); return 0; },
   async lstat(p) { return fs.lstatSync(p); },
   async read(fd, buffer, offset, length, position) {
@@ -32,13 +38,16 @@ const uxpFs = {
 const TYPE = { CLIP: 1, BIN: 2, ROOT: 3, FILE: 4 };
 const refreshed = [];
 let pathCalls = 0;
+const offline = [];
+const relinked = [];
 function clip(name, mediaPath) {
   return {
     name, type: TYPE.CLIP,
+    createSetOfflineAction() { return { offline: name }; },
+    async changeMediaFilePath(p) { relinked.push([name, p]); return true; },
     async getMediaFilePath() { pathCalls++; return mediaPath; },
     async refreshMedia() { refreshed.push(name); return true; },
     async hasProxy() { return false; },
-    async changeMediaFilePath() { return true; },
   };
 }
 let binIds = 0;
@@ -51,8 +60,8 @@ const ppro = {
   Project: {
     async getActiveProject() {
       return {
-        lockedAccess() {},
-        executeTransaction() {},
+        lockedAccess(fn) { fn(); },
+        executeTransaction(fn) { fn({ addAction(a) { offline.push(a.offline); } }); return true; },
         async getRootItem() { return { name: "root", type: TYPE.ROOT, async getItems() { return selection; } }; },
       };
     },
@@ -183,6 +192,53 @@ test("Annuler ne touche pas un fichier modifié depuis par une autre rotation", 
   const undo = await undoOperation(JSON.parse(JSON.stringify(first.operation)));
   assert.deepStrictEqual(undo, { restored: 0, skipped: 1, failed: 0 });
   assert.strictEqual(await rotationOf(file), 180);
+});
+
+test("Fichier verrouillé par Premiere (Windows) : hors ligne, écriture, puis re-lié", async () => {
+  const file = makeVideo("L1.MP4");
+  selection = [clip("L1", file)];
+  offline.length = 0; relinked.length = 0;
+  let attempts = 0;
+  failOpen = (p, flag) => (flag === "r+" && attempts++ === 0 ? "EBUSY: resource busy or locked" : null);
+  const res = await rotateSelection(270);
+  failOpen = () => null;
+  assert.strictEqual(res.done, 1);
+  assert.strictEqual(await rotationOf(file), 270);
+  assert.deepStrictEqual(offline, ["L1"]);
+  assert.deepStrictEqual(relinked, [["L1", file]]);
+});
+
+test("Carte SD verrouillée : message clair, clip jamais mis hors ligne", async () => {
+  const file = makeVideo("RO.MP4");
+  selection = [clip("RO", file)];
+  offline.length = 0; relinked.length = 0;
+  failOpen = (p, flag) => (flag === "r+" ? "EACCES: permission denied" : null);
+  const logs = [];
+  const res = await rotateSelection(270, { log: (m) => logs.push(m) });
+  failOpen = () => null;
+  assert.strictEqual(res.failed, 1);
+  assert.strictEqual(await rotationOf(file), 0);
+  assert.deepStrictEqual(offline, []);
+  assert.ok(logs.some((l) => l.includes("lecture seule")), logs.join("\n"));
+});
+
+test("Verrou persistant : le clip est re-lié même si l'écriture échoue", async () => {
+  const file = makeVideo("L2.MP4");
+  selection = [clip("L2", file)];
+  offline.length = 0; relinked.length = 0;
+  failOpen = (p, flag) => (flag === "r+" ? "EBUSY: resource busy or locked" : null);
+  const res = await rotateSelection(270);
+  failOpen = () => null;
+  assert.strictEqual(res.failed, 1);
+  assert.deepStrictEqual(offline, ["L2"]);
+  assert.deepStrictEqual(relinked, [["L2", file]]);
+});
+
+test("Pause entre actualisations : proportionnelle et bornée", () => {
+  const { refreshPause } = require("../src/premiere.js");
+  assert.strictEqual(refreshPause(0), 30);
+  assert.strictEqual(refreshPause(200), 100);
+  assert.strictEqual(refreshPause(5000), 250);
 });
 
 test("Sélection vide : message explicite", async () => {

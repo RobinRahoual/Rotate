@@ -38,3 +38,19 @@ test("Libellés", () => {
   assert.strictEqual(settings.rotationLabel(270), "↺ -90°");
   assert.strictEqual(settings.rotationLabel(90), "↻ +90°");
 });
+
+test("Historique : 10 opérations max, taille plafonnée, dernière opération toujours gardée", () => {
+  const storage = memoryStorage();
+  const op = (n, files) => ({ date: n, rotation: 270, files: Array.from({ length: files }, (_, i) => ({ path: `/r/${n}/${i}.MP4`, name: `${i}`, changes: [] })) });
+  for (let n = 1; n <= 12; n++) settings.pushHistory(storage, op(n, 1));
+  assert.strictEqual(JSON.parse(storage.getItem("rotate.history")).length, settings.MAX_HISTORY);
+  assert.strictEqual(settings.lastHistory(storage).date, 12);
+  // Une énorme opération fait sortir les anciennes, mais reste annulable.
+  settings.pushHistory(storage, op(13, 20000));
+  assert.ok(storage.getItem("rotate.history").length <= settings.MAX_HISTORY_CHARS || JSON.parse(storage.getItem("rotate.history")).length === 1);
+  assert.strictEqual(settings.lastHistory(storage).date, 13);
+  assert.strictEqual(settings.popHistory(storage).date, 13);
+  settings.pushHistory(storage, op(15, 1));
+  settings.pushHistory(storage, { date: 14, rotation: 0, files: [] }); // vide : ignorée
+  assert.strictEqual(settings.lastHistory(storage).date, 15);
+});

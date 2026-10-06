@@ -1,7 +1,7 @@
 {
   "id": "fr.robinrahoual.rotate",
   "name": "Rotate",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "main": "index.html",
   "manifestVersion": 5,
   "host": {

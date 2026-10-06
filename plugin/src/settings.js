@@ -25,6 +25,9 @@ const KEYS = {
 const DEFAULT_CHOICES = [90, 270, 180];
 const FALLBACK_DEFAULT = 270;
 const MAX_HISTORY = 10;
+// Taille maximale de l'historique enregistré (~1 Mo) : avec de très grosses
+// opérations, on garde moins de 10 entrées plutôt que de saturer le stockage.
+const MAX_HISTORY_CHARS = 1000000;
 
 function read(storage, key) {
   try {
@@ -98,24 +101,51 @@ function setJSON(storage, key, value) {
 
 /*
  * Une opération : { date, rotation, files: [{ path, name, changes: [{ position, before, after }] }] }
+ * L'historique est relu souvent (bouton « Annuler ») : on garde la dernière
+ * version décodée tant que le texte enregistré n'a pas changé.
  */
+let historyMemo = { raw: undefined, list: [] };
+
+function readHistory(storage) {
+  const raw = read(storage, KEYS.history);
+  if (raw !== historyMemo.raw) {
+    let list = [];
+    try {
+      list = raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      list = [];
+    }
+    historyMemo = { raw, list: Array.isArray(list) ? list : [] };
+  }
+  return historyMemo.list.slice();
+}
+
+function writeHistory(storage, history) {
+  let raw = JSON.stringify(history);
+  while (history.length > 1 && raw.length > MAX_HISTORY_CHARS) {
+    history.shift();
+    raw = JSON.stringify(history);
+  }
+  write(storage, KEYS.history, raw);
+}
+
 function pushHistory(storage, operation) {
   if (!operation.files.length) return;
-  const history = readJSON(storage, KEYS.history, []);
+  const history = readHistory(storage);
   history.push(operation);
   while (history.length > MAX_HISTORY) history.shift();
-  write(storage, KEYS.history, JSON.stringify(history));
+  writeHistory(storage, history);
 }
 
 function lastHistory(storage) {
-  const history = readJSON(storage, KEYS.history, []);
+  const history = readHistory(storage);
   return history.length ? history[history.length - 1] : null;
 }
 
 function popHistory(storage) {
-  const history = readJSON(storage, KEYS.history, []);
+  const history = readHistory(storage);
   const last = history.pop() || null;
-  write(storage, KEYS.history, JSON.stringify(history));
+  writeHistory(storage, history);
   return last;
 }
 
@@ -140,6 +170,7 @@ module.exports = {
   DEFAULT_CHOICES,
   FALLBACK_DEFAULT,
   MAX_HISTORY,
+  MAX_HISTORY_CHARS,
   getDefaultRotation,
   setDefaultRotation,
   getBool,

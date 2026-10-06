@@ -30,6 +30,8 @@ const ROTATIONS = [0, 90, 180, 270];
 
 // Garde-fou contre les fichiers corrompus (boucle infinie sur des boîtes vides).
 const MAX_BOXES_PER_LEVEL = 10000;
+// Taille des blocs lus d'un coup : une poignée de lectures disque par fichier au lieu de dizaines.
+const READ_BLOCK = 4 * 1024;
 
 function isSupportedPath(path) {
   const lower = String(path).toLowerCase();
@@ -42,6 +44,37 @@ function fourcc(bytes, offset) {
 
 function viewOf(bytes) {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+/*
+ * Enveloppe `io` avec un petit cache : chaque lecture charge un bloc de 4 Ko,
+ * et les lectures suivantes dans ce bloc ne touchent plus le disque. Chaque
+ * appel au système de fichiers coûte cher dans UXP (aller-retour avec
+ * Premiere) : on passe d'une vingtaine de lectures par rush à environ 6.
+ */
+function cached(io) {
+  if (io.isCached) return io;
+  let block = null;
+  let blockPos = 0;
+  return {
+    isCached: true,
+    size: () => io.size(),
+    async read(pos, len) {
+      if (block && pos >= blockPos && pos + len <= blockPos + block.length) {
+        return block.subarray(pos - blockPos, pos - blockPos + len);
+      }
+      if (len > READ_BLOCK) return io.read(pos, len);
+      const n = Math.min(READ_BLOCK, (await io.size()) - pos);
+      if (n < len) return io.read(pos, len); // au-delà de la fin : laisser l'erreur remonter
+      block = await io.read(pos, n);
+      blockPos = pos;
+      return block.subarray(0, len);
+    },
+    async write(pos, bytes) {
+      block = null;
+      return io.write(pos, bytes);
+    },
+  };
 }
 
 /* Lit l'en-tête de la boîte qui commence à `pos` (sans dépasser `end`). */
@@ -91,6 +124,7 @@ async function findChild(io, parent, type) {
  * de leur matrice, ainsi que leur largeur/hauteur stockées dans le tkhd.
  */
 async function findVideoTracks(io) {
+  io = cached(io);
   const fileSize = await io.size();
   const [moov] = await findBoxes(io, 0, fileSize, ["moov"], true);
   if (!moov) {
@@ -110,7 +144,8 @@ async function findVideoTracks(io) {
     const handler = await io.read(hdlr.start + hdlr.headerSize + 8, 4);
     if (fourcc(handler, 0) !== "vide") continue;
 
-    const tkhdBytes = await io.read(tkhd.start, tkhd.end - tkhd.start);
+    // tkhd fait 92 ou 104 octets : on ne lit jamais plus que le nécessaire, même si la boîte est corrompue.
+    const tkhdBytes = await io.read(tkhd.start, Math.min(tkhd.end - tkhd.start, 128));
     const content = tkhd.headerSize;
     const version = tkhdBytes[content];
     // version 0 : dates/durée sur 32 bits (20 octets), version 1 : sur 64 bits (32 octets)
@@ -185,6 +220,7 @@ function encodeMatrix(m) {
 
 /* Rotation actuelle de la première piste vidéo. */
 async function getRotation(io) {
+  io = cached(io);
   const tracks = await findVideoTracks(io);
   return matrixToRotation(tracks[0].matrix);
 }
@@ -195,6 +231,7 @@ async function getRotation(io) {
  * Media Encoder avant de l'attacher.
  */
 async function readVideoInfo(io) {
+  io = cached(io);
   const fileSize = await io.size();
   const [moov] = await findBoxes(io, 0, fileSize, ["moov"], true);
   if (!moov) throw new Error("Aucune boîte \"moov\" trouvée.");
@@ -251,6 +288,7 @@ function fromHex(hex) {
  * pouvoir annuler exactement.
  */
 async function planRotation(io, degrees) {
+  io = cached(io);
   const tracks = await findVideoTracks(io);
   const writes = [];
   for (const track of tracks) {
@@ -271,6 +309,7 @@ async function applyPlan(io, plan) {
 
 /* Raccourci lecture + écriture sur le même accès fichier. Retourne { previous, rotation, changed }. */
 async function setRotation(io, degrees) {
+  io = cached(io);
   const plan = await planRotation(io, degrees);
   await applyPlan(io, plan);
   return { previous: plan.previous, rotation: degrees, changed: plan.writes.length > 0 };
@@ -300,6 +339,7 @@ async function restoreBytes(io, changes) {
  * d'écrire un proxy : tant que l'encodage tourne, le "moov" n'existe pas encore.
  */
 async function isComplete(io) {
+  io = cached(io);
   try {
     const size = await io.size();
     const boxes = await findBoxes(io, 0, size, ["moov"], false);
@@ -320,6 +360,7 @@ module.exports = {
   restoreBytes,
   isComplete,
   readVideoInfo,
+  cached,
   toHex,
   // exportés pour les tests
   buildMatrix,

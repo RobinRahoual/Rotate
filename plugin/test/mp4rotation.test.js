@@ -124,22 +124,33 @@ test("isSupportedPath", () => {
   assert.ok(!rotation.isSupportedPath("/Volumes/SD/clip.mxf"));
 });
 
-test("Lecture minimale : quelques centaines d'octets lus, quelle que soit la durée du rush", async () => {
-  const file = makeVideo("long.mp4");
-  let bytesRead = 0;
-  let reads = 0;
-  const io = nodeIo(file);
-  const counting = {
-    size: io.size,
-    read: async (p, l) => { reads++; bytesRead += l; return io.read(p, l); },
-    write: io.write,
-  };
-  try {
-    const plan = await rotation.planRotation(counting, 90);
-    assert.strictEqual(plan.writes.length, 1);
-    assert.strictEqual(plan.writes[0].bytes.length, 36);
-  } finally { io.close(); }
-  assert.ok(bytesRead < 2048, `${bytesRead} octets lus en ${reads} lectures`);
+test("Lecture minimale : quelques lectures disque, quelle que soit la durée du rush", async () => {
+  async function count(file) {
+    const io = nodeIo(file);
+    let reads = 0;
+    let bytes = 0;
+    const counting = {
+      size: io.size,
+      read: async (p, l) => { reads++; bytes += l; return io.read(p, l); },
+      write: io.write,
+    };
+    try {
+      const plan = await rotation.planRotation(counting, 90);
+      assert.strictEqual(plan.writes.length, 1);
+      assert.strictEqual(plan.writes[0].bytes.length, 36);
+    } finally { io.close(); }
+    return { reads, bytes };
+  }
+  const short = await count(makeVideo("court.mp4"));
+  // Rush de 60 s : index (moov) bien plus gros, mais toujours aussi peu de lectures.
+  const longFile = path.join(tmp, "long.mp4");
+  execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=25:duration=60",
+    "-f", "lavfi", "-i", "sine=duration=60", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", longFile]);
+  const long = await count(longFile);
+  for (const r of [short, long]) {
+    assert.ok(r.reads <= 6, `${r.reads} lectures`);
+    assert.ok(r.bytes <= 6 * 4096, `${r.bytes} octets`);
+  }
 });
 
 test("planRotation ne modifie jamais le fichier", async () => {

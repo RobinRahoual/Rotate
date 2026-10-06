@@ -15,7 +15,10 @@
 
 const PROXY_FOLDER = "Proxies";
 const POLL_MS = 3000;
-const GIVE_UP_MS = 12 * 60 * 60 * 1000; // 12 h
+const GIVE_UP_MS = 12 * 60 * 60 * 1000; // 12 h sans aucun fichier : Media Encoder ne l'a jamais traité
+const STALL_MS = 15 * 60 * 1000; // fichier incomplet qui ne grossit plus depuis 15 min : encodage interrompu
+const RESOLVE_RETRY_MS = 60 * 1000; // clip introuvable : on ne reparcourt le projet qu'une fois par minute
+const RESOLVE_GIVE_UP_MS = 30 * 60 * 1000;
 
 function splitPath(path) {
   const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
@@ -118,7 +121,7 @@ function createProxyQueue(deps) {
   }
 
   async function resolveClip(job) {
-    if (clipCache.has(job.path)) return clipCache.get(job.path);
+    if (clipCache.get(job.path)) return clipCache.get(job.path);
     const project = await deps.ppro.Project.getActiveProject();
     if (!project) return null;
     const found = await deps.findClipsByPaths(project, [job.path]);
@@ -145,6 +148,13 @@ function createProxyQueue(deps) {
     return null;
   }
 
+  function finishJob(job, ok, message, level) {
+    pending = pending.filter((p) => p !== job);
+    log(`${job.name} : ${message}`, level);
+    onJobDone(job, ok);
+    save();
+  }
+
   /* Vérifie les encodages en attente et attache les proxys terminés. */
   async function check() {
     if (checking) return;
@@ -158,42 +168,49 @@ function createProxyQueue(deps) {
           size = null;
         }
         if (size === null) {
-          if (now() - job.queuedAt > GIVE_UP_MS) {
-            pending = pending.filter((p) => p !== job);
-            log(`${job.name} : proxy jamais produit par Media Encoder, abandonné`, "warn");
-            save();
+          if (now() - job.queuedAt > GIVE_UP_MS) finishJob(job, false, "proxy jamais produit par Media Encoder, abandonné", "warn");
+          continue;
+        }
+        // Le fichier grossit encore : Media Encoder écrit, inutile de l'analyser.
+        if (job.lastSize !== size) {
+          job.lastSize = size;
+          job.lastChangeAt = now();
+          continue;
+        }
+        const complete = await deps.withFile(job.proxyPath, "r", (io) => deps.rotation.isComplete(io)).catch(() => false);
+        if (!complete) {
+          if (now() - (job.lastChangeAt || job.queuedAt) > STALL_MS) {
+            finishJob(job, false, "encodage interrompu dans Media Encoder (fichier incomplet), relance la création du proxy", "error");
           }
           continue;
         }
-        // Fichier complet ET taille stable entre deux vérifications.
-        const complete = await deps.withFile(job.proxyPath, "r", (io) => deps.rotation.isComplete(io)).catch(() => false);
-        const stable = job.lastSize === size;
-        job.lastSize = size;
-        if (!complete || !stable) continue;
 
         // Contrôle avant d'attacher : proxy vertical, même format et même cadence que le rush.
         const problem = await checkProxy(job);
         if (problem) {
-          pending = pending.filter((p) => p !== job);
-          log(`${job.name} : proxy non attaché - ${problem}`, "error");
-          onJobDone(job, false);
-          save();
+          finishJob(job, false, `proxy non attaché - ${problem}`, "error");
           continue;
         }
 
+        // Projet fermé ou clip introuvable : on réessaie de temps en temps, sans reparcourir le projet à chaque fois.
+        if (job.nextResolveAt && now() < job.nextResolveAt) continue;
         const clip = await resolveClip(job);
-        if (!clip) continue; // projet fermé ou clip introuvable pour l'instant : on réessaiera
+        if (!clip) {
+          job.unresolvedSince = job.unresolvedSince || now();
+          job.nextResolveAt = now() + RESOLVE_RETRY_MS;
+          if (now() - job.unresolvedSince > RESOLVE_GIVE_UP_MS) {
+            finishJob(job, false, `proxy prêt mais rush introuvable dans le projet ouvert : attache-le à la main (${job.proxyPath})`, "warn");
+          }
+          continue;
+        }
         let attached = false;
         try {
           attached = await clip.attachProxy(job.proxyPath, false);
         } catch (e) {
           attached = false;
         }
-        pending = pending.filter((p) => p !== job);
-        if (attached) log(`${job.name} : proxy vertical attaché`, "ok");
-        else log(`${job.name} : proxy prêt mais impossible de l'attacher (clic droit > Proxy > Attacher les proxys)`, "warn");
-        onJobDone(job, attached);
-        save();
+        if (attached) finishJob(job, true, "proxy vertical attaché", "ok");
+        else finishJob(job, false, "proxy prêt mais impossible de l'attacher (clic droit > Proxy > Attacher les proxys)", "warn");
       }
     } finally {
       checking = false;
@@ -232,7 +249,7 @@ function createProxyQueue(deps) {
         // 0 = tout le clip ; supprimé de la file AME une fois terminé ; démarrage immédiat.
         const ok = await manager.encodeProjectItem(entry.clip, proxyPath, presetPath, 0, true, true);
         if (!ok) throw new Error("Media Encoder a refusé l'encodage");
-        clipCache.set(entry.path, entry.clip);
+        if (entry.clip) clipCache.set(entry.path, entry.clip);
         pending.push({
           path: entry.path,
           name: entry.name,

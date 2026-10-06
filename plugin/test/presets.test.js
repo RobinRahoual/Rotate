@@ -152,4 +152,12 @@ test("Le faux encodeur ne sait jamais réduire : échec explicite avec le détai
   await assert.rejects(presets.createVerticalPreset(deps(base, enc), "720x1280"), /320×180/);
 });
 
+test("Media Encoder ne produit rien : arrêt immédiat, pas 24 essais", async () => {
+  const base = makeInstall(TEMPLATE);
+  let calls = 0;
+  const enc = { encodeTest: async () => { calls++; return true; }, waitForFile: async () => false };
+  await assert.rejects(presets.createVerticalPreset(deps(base, enc), "720x1280"), /aucun fichier test/);
+  assert.strictEqual(calls, 1);
+});
+
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

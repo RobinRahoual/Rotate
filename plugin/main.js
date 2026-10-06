@@ -294,7 +294,13 @@ async function confirmDialog(text, okLabel, cancelLabel = "Annuler") {
  *   intro, items: [{ label, value }] (tous cochés au départ),
  *   lines: [{ text, className }] (lignes non cochables), okLabel(checkedValues), cancelLabel, size
  * }. Renvoie les valeurs cochées, ou null si abandon.
+ *
+ * Au-delà de MAX_CHECKLIST_ITEMS éléments, seuls les premiers sont affichés
+ * (cochables) et les autres sont inclus d'office : des centaines de cases
+ * Spectrum ralentiraient fortement l'ouverture de la fenêtre.
  */
+const MAX_CHECKLIST_ITEMS = 150;
+const MAX_CHECKLIST_LINES = 50;
 async function checklistDialog(options) {
   const answer = await showDialog((dialog) => {
     dialog.innerHTML = `
@@ -313,7 +319,9 @@ async function checklistDialog(options) {
     const list = dialog.querySelector("#list");
     const boxes = [];
     const valueOf = new Map();
-    for (const item of options.items) {
+    const shown = options.items.slice(0, MAX_CHECKLIST_ITEMS);
+    const hidden = options.items.slice(MAX_CHECKLIST_ITEMS).map((item) => item.value);
+    for (const item of shown) {
       const box = document.createElement("sp-checkbox");
       box.setAttribute("checked", "");
       box.textContent = item.label;
@@ -321,16 +329,20 @@ async function checklistDialog(options) {
       list.appendChild(box);
       boxes.push(box);
     }
-    for (const line of options.lines || []) {
+    const addLine = (text, className) => {
       const el = document.createElement("div");
-      el.className = `line ${line.className || "muted"}`;
-      el.textContent = line.text;
+      el.className = `line ${className || "muted"}`;
+      el.textContent = text;
       list.appendChild(el);
-    }
+    };
+    if (hidden.length) addLine(`… et ${hidden.length} autre(s), inclus automatiquement`, "muted");
+    const lines = options.lines || [];
+    lines.slice(0, MAX_CHECKLIST_LINES).forEach((line) => addLine(line.text, line.className));
+    if (lines.length > MAX_CHECKLIST_LINES) addLine(`… et ${lines.length - MAX_CHECKLIST_LINES} autre(s) ligne(s)`, "muted");
 
     const yes = dialog.querySelector("#yes");
     const isChecked = (b) => b.checked === true || (b.checked === undefined && b.hasAttribute("checked"));
-    const checkedValues = () => boxes.filter(isChecked).map((b) => valueOf.get(b));
+    const checkedValues = () => boxes.filter(isChecked).map((b) => valueOf.get(b)).concat(hidden);
     const update = () => {
       const values = checkedValues();
       yes.textContent = values.length ? options.okLabel(values) : "Rien de coché";
@@ -504,7 +516,7 @@ const proxies = createProxyQueue({
   onQueued: (proxyPath) => {
     const known = settings.getJSON(storage, "createdProxies", []);
     known.push(proxyPath);
-    settings.setJSON(storage, "createdProxies", known.slice(-5000));
+    settings.setJSON(storage, "createdProxies", known.slice(-2000));
   },
 });
 
@@ -796,82 +808,96 @@ function renderDefault() {
 }
 
 /* ---------- Événements ---------- */
+// Initialisation du panneau. Protégée : quoi qu'il arrive ici, les commandes du
+// menu (déclarées juste après) restent disponibles.
+function initPanel() {
 
-$("rotate-default").addEventListener("click", () => runRotation(defaultRotation).then(renderUndo));
-$("undo").addEventListener("click", () => undoLast(false));
-$("cancel").addEventListener("click", () => {
-  cancelRequested = true;
-  $("status-detail").textContent = "Arrêt après le rush en cours…";
-});
-$("clear-log").addEventListener("click", () => ($("log").textContent = ""));
-$("status-close").addEventListener("click", () => status.reset());
-$("status-log").addEventListener("click", () => {
-  try {
-    $("log").scrollIntoView();
-  } catch (e) {
-    // défilement non pris en charge : le journal reste en bas du panneau
-  }
-});
-
-$("default-choice").addEventListener("change", (event) => {
-  defaultRotation = settings.setDefaultRotation(storage, Number(event.target.value));
-  renderDefault();
-});
-$("opt-preview").addEventListener("change", (e) => settings.setBool(storage, "preview", e.target.checked));
-$("opt-auto-proxy").addEventListener("change", (e) => settings.setBool(storage, "autoProxy", e.target.checked));
-$("choose-preset").addEventListener("click", choosePreset);
-$("auto-preset").addEventListener("click", backToAutoPreset);
-$("proxy-size").addEventListener("change", (event) => {
-  settings.setString(storage, "proxySize", event.target.value);
-  renderPreset();
-});
-$("make-proxies").addEventListener("click", makeProxiesForSelection);
-$("clean-proxies").addEventListener("click", cleanupProxies);
-$("opt-end-sound").addEventListener("change", (e) => settings.setBool(storage, "endSound", e.target.checked));
-$("test-signal").addEventListener("click", () => {
-  status.finish("ok", "Test du signal de fin", "Le bilan clignote et le son est joué (si activé).");
-  signalEnd($("status"));
-});
-$("instagram").addEventListener("click", openInstagram);
-document.querySelectorAll("[data-shortcut]").forEach((button) => {
-  button.addEventListener("click", () => {
-    capturing = capturing === button.getAttribute("data-shortcut") ? null : button.getAttribute("data-shortcut");
-    renderShortcuts();
+  $("rotate-default").addEventListener("click", () => runRotation(defaultRotation).then(renderUndo));
+  $("undo").addEventListener("click", () => undoLast(false));
+  $("cancel").addEventListener("click", () => {
+    cancelRequested = true;
+    $("status-detail").textContent = "Arrêt après le rush en cours…";
   });
-});
-document.addEventListener("keydown", onKeyDown);
+  $("clear-log").addEventListener("click", () => ($("log").textContent = ""));
+  $("status-close").addEventListener("click", () => status.reset());
+  $("status-log").addEventListener("click", () => {
+    try {
+      $("log").scrollIntoView();
+    } catch (e) {
+      // défilement non pris en charge : le journal reste en bas du panneau
+    }
+  });
 
-document.querySelectorAll("[data-rotation]").forEach((button) => {
-  button.addEventListener("click", () => runRotation(Number(button.getAttribute("data-rotation"))).then(renderUndo));
-});
+  $("default-choice").addEventListener("change", (event) => {
+    defaultRotation = settings.setDefaultRotation(storage, Number(event.target.value));
+    renderDefault();
+  });
+  $("opt-preview").addEventListener("change", (e) => settings.setBool(storage, "preview", e.target.checked));
+  $("opt-auto-proxy").addEventListener("change", (e) => settings.setBool(storage, "autoProxy", e.target.checked));
+  $("choose-preset").addEventListener("click", choosePreset);
+  $("auto-preset").addEventListener("click", backToAutoPreset);
+  $("proxy-size").addEventListener("change", (event) => {
+    settings.setString(storage, "proxySize", event.target.value);
+    renderPreset();
+  });
+  $("make-proxies").addEventListener("click", makeProxiesForSelection);
+  $("clean-proxies").addEventListener("click", cleanupProxies);
+  $("opt-end-sound").addEventListener("change", (e) => settings.setBool(storage, "endSound", e.target.checked));
+  $("test-signal").addEventListener("click", () => {
+    status.finish("ok", "Test du signal de fin", "Le bilan clignote et le son est joué (si activé).");
+    signalEnd($("status"));
+  });
+  $("instagram").addEventListener("click", openInstagram);
+  document.querySelectorAll("[data-shortcut]").forEach((button) => {
+    button.addEventListener("click", () => {
+      capturing = capturing === button.getAttribute("data-shortcut") ? null : button.getAttribute("data-shortcut");
+      renderShortcuts();
+    });
+  });
+  document.addEventListener("keydown", onKeyDown);
 
-setChecked($("opt-preview"), settings.getBool(storage, "preview", true));
-setChecked($("opt-auto-proxy"), settings.getBool(storage, "autoProxy", false));
-setChecked($("opt-end-sound"), settings.getBool(storage, "endSound", true));
-renderShortcuts();
-renderDefault();
-renderPreset();
-renderUndo();
-proxies.resume();
-renderProxyBanner();
+  document.querySelectorAll("[data-rotation]").forEach((button) => {
+    button.addEventListener("click", () => runRotation(Number(button.getAttribute("data-rotation"))).then(renderUndo));
+  });
 
-// Après une grosse mise à jour de Premiere : prévenir tout de suite si une fonction manque.
-(() => {
-  const { missingRequired, missingOptional } = checkCompatibility(ppro);
-  let version = "";
+  setChecked($("opt-preview"), settings.getBool(storage, "preview", true));
+  setChecked($("opt-auto-proxy"), settings.getBool(storage, "autoProxy", false));
+  setChecked($("opt-end-sound"), settings.getBool(storage, "endSound", true));
+  renderShortcuts();
+  renderDefault();
+  renderPreset();
+  renderUndo();
+  proxies.resume();
+  renderProxyBanner();
+
+  // Après une grosse mise à jour de Premiere : prévenir tout de suite si une fonction manque.
+  (() => {
+    const { missingRequired, missingOptional } = checkCompatibility(ppro);
+    let version = "";
+    try {
+      version = uxp.host ? `${uxp.host.name} ${uxp.host.version}` : "";
+    } catch (e) {
+      version = "";
+    }
+    log(`Rotate ${manifest.version} · plugin par @robin.rahoual sur Instagram${version ? ` · ${version}` : ""}`, "info");
+    if (missingRequired.length) {
+      status.finish("error", "Plugin à mettre à jour", `Cette version de Premiere ne fournit plus : ${missingRequired.join(", ")}.`);
+      log(`Fonctions Premiere manquantes : ${missingRequired.join(", ")}`, "error");
+    } else if (missingOptional.length) {
+      log(`Proxys indisponibles avec cette version de Premiere (manque : ${missingOptional.join(", ")}).`, "warn");
+    }
+  })();
+}
+
+try {
+  initPanel();
+} catch (e) {
   try {
-    version = uxp.host ? `${uxp.host.name} ${uxp.host.version}` : "";
-  } catch (e) {
-    version = "";
+    log(`Initialisation incomplète du panneau : ${errorMessage(e)}`, "error");
+  } catch (ignored) {
+    // panneau indisponible
   }
-  log(`Rotate ${manifest.version} · plugin par @robin.rahoual sur Instagram${version ? ` · ${version}` : ""}`, "info");
-  if (missingRequired.length) {
-    status.finish("error", "Plugin à mettre à jour", `Cette version de Premiere ne fournit plus : ${missingRequired.join(", ")}.`);
-    log(`Fonctions Premiere manquantes : ${missingRequired.join(", ")}`, "error");
-  } else if (missingOptional.length) {
-    log(`Proxys indisponibles avec cette version de Premiere (manque : ${missingOptional.join(", ")}).`, "warn");
-  }
-})();
+}
 
 /* ---------- Entrées du menu Fenêtre > Plugins UXP > Rotate ---------- */
 

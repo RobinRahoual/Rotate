@@ -148,6 +148,42 @@ test("Proxy refusé s'il est horizontal ou n'a pas la cadence du rush", async ()
   assert.ok(logs.some((l) => l.startsWith("[error] R2") && l.includes("cadence")), logs.join("\n"));
 });
 
+test("Encodage interrompu, rush introuvable : pas de boucle coûteuse, bilan exact", async () => {
+  const preset = path.join(tmp, "v3.epr");
+  fs.writeFileSync(preset, "QuickTime");
+  let clock = 1000000;
+  const done = [];
+  let lookups = 0;
+  const encodes = [];
+  let stored = [];
+  const queue = createProxyQueue({
+    ppro: {
+      EncoderManager: { getManager: () => ({ async encodeProjectItem(c, out) { encodes.push(out); return true; } }) },
+      EventManager: { addEventListener() {} },
+      Project: { async getActiveProject() { return {}; } },
+    },
+    fs: uxpFs, rotation, withFile,
+    findClipsByPaths: async () => { lookups++; return new Map(); }, // rush absent du projet ouvert
+    load: () => stored, save: (l) => { stored = l; }, onJobDone: (job, ok) => done.push([job.name, ok]),
+    setInterval: () => 1, clearInterval: () => {}, now: () => clock,
+  });
+  const a = await rotatedRush("S1.MP4");
+  const b = await rotatedRush("S2.MP4");
+  await queue.create([{ name: "S1", path: a, clip: null }, { name: "S2", path: b, clip: null }], preset);
+  // S1 : encodage figé (fichier partiel qui ne bouge plus). S2 : terminé, mais rush introuvable.
+  fs.writeFileSync(encodes[0], fs.readFileSync(finished).subarray(0, 300));
+  fs.copyFileSync(finished, encodes[1]);
+  queue.stop();
+  await queue.check(); // tailles notées
+  for (let i = 0; i < 20; i++) { clock += 3000; await queue.check(); } // 1 minute de vérifications
+  assert.ok(lookups <= 2, `${lookups} parcours du projet en 1 min`);
+  clock += 16 * 60 * 1000; await queue.check();
+  assert.deepStrictEqual(done, [["S1", false]]);
+  clock += 31 * 60 * 1000; await queue.check();
+  assert.deepStrictEqual(done, [["S1", false], ["S2", false]]);
+  assert.strictEqual(queue.pendingCount(), 0);
+});
+
 test("waitForCompleteFile : attend la fin d'écriture", async () => {
   const out = path.join(tmp, "growing.mov");
   fs.writeFileSync(out, fs.readFileSync(finished).subarray(0, 100));
