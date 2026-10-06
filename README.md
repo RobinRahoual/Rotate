@@ -1,7 +1,6 @@
 # Rotate — plugin Premiere Pro
 
-Plugin gratuit créé par **Robin Rahoual** — suis-moi sur Instagram : [@robin.rahoual](https://www.instagram.com/robin.rahoual/)
-(bouton **Instagram** en bas du panneau).
+Plugin gratuit créé par **Robin Rahoual** — suis-moi sur Instagram : [@robin.rahoual](https://www.instagram.com/robin.rahoual/).
 
 Passe tes rushs filmés à la verticale (Sony A7 III, etc.) **en vertical directement dans Premiere Pro**,
 sans ré-export, sans doublon de fichier et sans perte de qualité.
@@ -34,14 +33,6 @@ vertical (ex. 2160×3840) dans le chutier, le moniteur source et les nouvelles s
 Le plugin reste installé après un redémarrage ou une mise à jour de Premiere. Pour le désinstaller :
 application Creative Cloud > *Gérer les plugins*. Si tu utilisais la version de développement, décharge-la
 d'abord dans UXP Developer Tool (sinon les deux se mélangent).
-
-### Mode développement (pour modifier le plugin)
-
-Prérequis : **Premiere Pro 25.6 ou plus récent** et l'application **UXP Developer Tool**.
-
-1. Dans Premiere : *Paramètres > Plugins* → cocher **Activer le mode développeur**, puis redémarrer Premiere.
-2. Ouvrir **UXP Developer Tool** → *Add Plugin* → sélectionner `plugin/manifest.json`.
-3. Cliquer sur **Load** (Premiere doit être ouvert). À refaire à chaque lancement de Premiere.
 
 ## Utilisation
 
