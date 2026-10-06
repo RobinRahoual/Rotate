@@ -51,6 +51,10 @@ body {
   width: 100%;
 }
 
+#summary {
+  margin: 6px 0 0;
+}
+
 .scroll {
   flex: 1;
   overflow-y: auto;
@@ -66,11 +70,6 @@ body {
 .progress sp-progressbar {
   flex: 1;
   margin-right: 6px;
-}
-
-.summary {
-  margin: 6px 0 0;
-  color: var(--text-muted);
 }
 
 .hidden {
@@ -112,3 +111,52 @@ body {
 .log .ok { color: var(--ok); }
 .log .warn { color: var(--warn); }
 .log .error { color: var(--error); }
+
+.muted {
+  color: var(--text-muted);
+}
+
+.header-row {
+  margin: 4px 0 0;
+}
+
+.section sp-checkbox {
+  display: block;
+  margin-top: 4px;
+}
+
+/* ---------- Boîte d'aperçu ---------- */
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.preview-list {
+  height: 260px;
+  overflow-y: auto;
+  margin: 6px 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+}
+
+.preview-list sp-checkbox,
+.preview-list .line {
+  display: block;
+  font-size: 12px;
+  margin: 1px 0;
+}
+
+.preview-list .error {
+  color: var(--error);
+}
+
+.preview footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.preview footer sp-button {
+  margin-left: 8px;
+}

@@ -37,6 +37,7 @@ function clip(name, mediaPath) {
     name, type: TYPE.CLIP,
     async getMediaFilePath() { pathCalls++; return mediaPath; },
     async refreshMedia() { refreshed.push(name); return true; },
+    async hasProxy() { return false; },
     async changeMediaFilePath() { return true; },
   };
 }
@@ -47,7 +48,15 @@ function bin(name, items) {
 }
 let selection = [];
 const ppro = {
-  Project: { async getActiveProject() { return { lockedAccess() {}, executeTransaction() {} }; } },
+  Project: {
+    async getActiveProject() {
+      return {
+        lockedAccess() {},
+        executeTransaction() {},
+        async getRootItem() { return { name: "root", type: TYPE.ROOT, async getItems() { return selection; } }; },
+      };
+    },
+  },
   ProjectUtils: { async getSelection() { return { async getItems() { return selection; } }; } },
   ProjectItem: { TYPE_CLIP: TYPE.CLIP, TYPE_BIN: TYPE.BIN, TYPE_ROOT: TYPE.ROOT, TYPE_FILE: TYPE.FILE },
   FolderItem: { cast: (i) => i },
@@ -60,7 +69,7 @@ Module._load = function (request, ...rest) {
   if (request === "fs" && rest[0] && /premiere\.js$/.test(rest[0].filename)) return uxpFs;
   return originalLoad.call(this, request, ...rest);
 };
-const { rotateSelection } = require("../src/premiere.js");
+const { rotateSelection, undoOperation } = require("../src/premiere.js");
 const rotation = require("../src/mp4rotation.js");
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rotate-ppro-"));
@@ -106,7 +115,7 @@ test("Sélection mixte : clips, chutiers imbriqués, doublons, séquence, hors l
   assert.ok(logs.some((l) => l.includes("Absent") && l.includes("introuvable")), logs.join("\n"));
   assert.ok(logs.some((l) => l.includes("Autre caméra") && l.includes("non pris en charge")));
   assert.ok(logs.some((l) => l.includes("1 élément(s) partagent un fichier")));
-  assert.deepStrictEqual(progress[progress.length - 1], [4, 4]);
+  assert.deepStrictEqual(progress[progress.length - 1], [3, 3]);
   assert.ok(res.timings.files >= 0 && res.timings.refresh >= 0);
 
   // Deuxième passage : aucun fichier réécrit, aucun rafraîchissement.
@@ -132,6 +141,48 @@ test("Annulation : s'arrête proprement entre deux clips", async () => {
   assert.strictEqual(res.done, 1);
   assert.strictEqual(await rotationOf(files[0]), 270);
   assert.strictEqual(await rotationOf(files[1]), 0);
+});
+
+test("Aperçu : seuls les rushs cochés sont tournés ; abandon = rien ne change", async () => {
+  const files = ["E1.MP4", "E2.MP4", "E3.MP4"].map(makeVideo);
+  selection = files.map((f, i) => clip(`E${i + 1}`, f));
+
+  const aborted = await rotateSelection(90, { confirm: async () => null });
+  assert.strictEqual(aborted.aborted, true);
+  for (const f of files) assert.strictEqual(await rotationOf(f), 0);
+
+  let seen = null;
+  const res = await rotateSelection(90, {
+    confirm: async (items) => { seen = items; return items.filter((i) => i.entry.name !== "E2"); },
+  });
+  assert.deepStrictEqual(seen.map((i) => [i.entry.name, i.status, i.previous]), [["E1", "todo", 0], ["E2", "todo", 0], ["E3", "todo", 0]]);
+  assert.strictEqual(res.done, 2);
+  assert.deepStrictEqual(await Promise.all(files.map(rotationOf)), [90, 0, 90]);
+});
+
+test("Annuler la dernière opération : fichiers identiques à l'octet près", async () => {
+  const files = ["F1.MP4", "F2.MP4"].map(makeVideo);
+  const hashes = files.map((f) => fs.readFileSync(f).toString("base64"));
+  selection = files.map((f, i) => clip(`F${i + 1}`, f));
+  const res = await rotateSelection(270);
+  assert.strictEqual(res.operation.files.length, 2);
+  // L'opération doit survivre à un passage par le stockage (JSON).
+  const op = JSON.parse(JSON.stringify(res.operation));
+  refreshed.length = 0;
+  const undo = await undoOperation(op);
+  assert.deepStrictEqual(undo, { restored: 2, skipped: 0, failed: 0 });
+  assert.deepStrictEqual(files.map((f) => fs.readFileSync(f).toString("base64")), hashes);
+  assert.deepStrictEqual(refreshed.sort(), ["F1", "F2"]);
+});
+
+test("Annuler ne touche pas un fichier modifié depuis par une autre rotation", async () => {
+  const file = makeVideo("G1.MP4");
+  selection = [clip("G1", file)];
+  const first = await rotateSelection(270);
+  await rotateSelection(180); // autre opération sur le même fichier
+  const undo = await undoOperation(JSON.parse(JSON.stringify(first.operation)));
+  assert.deepStrictEqual(undo, { restored: 0, skipped: 1, failed: 0 });
+  assert.strictEqual(await rotationOf(file), 180);
 });
 
 test("Sélection vide : message explicite", async () => {

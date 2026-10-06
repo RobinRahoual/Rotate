@@ -1,10 +1,13 @@
 {
   "id": "fr.robinrahoual.rotate",
   "name": "Rotate",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "main": "index.html",
   "manifestVersion": 5,
-  "host": { "app": "premierepro", "minVersion": "25.6.0" },
+  "host": {
+    "app": "premierepro",
+    "minVersion": "25.6.0"
+  },
   "requiredPermissions": {
     "localFileSystem": "fullAccess"
   },
@@ -12,20 +15,42 @@
     {
       "type": "panel",
       "id": "rotatePanel",
-      "label": { "default": "Rotate" },
-      "minimumSize": { "width": 180, "height": 120 },
-      "preferredDockedSize": { "width": 260, "height": 420 },
-      "preferredFloatingSize": { "width": 300, "height": 480 }
+      "label": {
+        "default": "Rotate"
+      },
+      "minimumSize": {
+        "width": 180,
+        "height": 120
+      },
+      "preferredDockedSize": {
+        "width": 260,
+        "height": 420
+      },
+      "preferredFloatingSize": {
+        "width": 300,
+        "height": 480
+      }
     },
     {
       "type": "command",
       "id": "rotateDefault",
-      "label": { "default": "Tourner la sélection en vertical (sens par défaut)" }
+      "label": {
+        "default": "Tourner la sélection en vertical (sens par défaut)"
+      }
     },
     {
       "type": "command",
       "id": "rotateReset",
-      "label": { "default": "Remettre la sélection à l'horizontale" }
+      "label": {
+        "default": "Remettre la sélection à l'horizontale"
+      }
+    },
+    {
+      "type": "command",
+      "id": "rotateUndo",
+      "label": {
+        "default": "Annuler la dernière opération Rotate"
+      }
     }
   ]
 }

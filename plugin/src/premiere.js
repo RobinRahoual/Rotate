@@ -17,6 +17,7 @@
 const ppro = require("premierepro");
 const fs = require("fs");
 const rotation = require("./mp4rotation.js");
+const { rotationLabel } = require("./settings.js");
 
 // Nombre d'appels simultanés à Premiere pendant la collecte des chemins.
 const COLLECT_CONCURRENCY = 8;
@@ -160,6 +161,36 @@ async function collectSelectedClips() {
   return { project, clips, skipped, duplicates };
 }
 
+/* Retrouve les clips du projet qui pointent vers `paths` (pour l'annulation et les proxys). */
+async function findClipsByPaths(project, paths) {
+  const wanted = new Set(paths);
+  const found = new Map();
+  async function visit(items) {
+    const clipItems = [];
+    const bins = [];
+    for (const item of items) {
+      if (item.type === ppro.ProjectItem.TYPE_BIN || item.type === ppro.ProjectItem.TYPE_ROOT) bins.push(item);
+      else if (item.type === ppro.ProjectItem.TYPE_CLIP) clipItems.push(item);
+    }
+    await mapLimit(clipItems, COLLECT_CONCURRENCY, async (item) => {
+      const clip = ppro.ClipProjectItem.cast(item);
+      let path = "";
+      try {
+        path = clip ? await clip.getMediaFilePath() : "";
+      } catch (e) {
+        path = "";
+      }
+      if (wanted.has(path) && !found.has(path)) found.set(path, { name: item.name, path, clip });
+    });
+    for (const bin of bins) {
+      if (found.size === wanted.size) return;
+      await visit(await ppro.FolderItem.cast(bin).getItems());
+    }
+  }
+  await visit([await project.getRootItem()]);
+  return found;
+}
+
 /* Met le clip hors ligne (libère le fichier côté Premiere, utile sous Windows). */
 function setOffline(project, clip) {
   project.lockedAccess(() => {
@@ -169,28 +200,22 @@ function setOffline(project, clip) {
 }
 
 /*
- * Écrit la nouvelle rotation dans le fichier.
- * Retourne { previous, changed, relinked } ; `relinked` indique que le clip a
- * déjà été re-lié (et donc relu) par Premiere.
+ * Écrit dans le fichier avec `writeFn(io)`. Si Premiere verrouille le fichier
+ * (Windows), on met le clip hors ligne, on écrit, puis on le re-lie.
+ * Retourne true si le clip a déjà été re-lié (donc relu) par Premiere.
  */
-async function writeRotation(project, entry, degrees) {
-  // 1. Lecture seule : on ne touche pas au fichier s'il est déjà dans le bon sens.
-  const plan = await withFile(entry.path, "r", (io) => rotation.planRotation(io, degrees));
-  if (!plan.writes.length) return { previous: plan.previous, changed: false, relinked: false };
-
-  // 2. Écriture des quelques octets de la matrice.
+async function writeFile(project, entry, writeFn) {
   try {
-    await withFile(entry.path, "r+", (io) => rotation.applyPlan(io, plan));
-    return { previous: plan.previous, changed: true, relinked: false };
+    await withFile(entry.path, "r+", writeFn);
+    return false;
   } catch (e) {
     if (!isLockedFileError(e)) throw e;
   }
-  // 3. Fichier verrouillé par Premiere : on le met hors ligne, on écrit, puis on le re-lie.
   setOffline(project, entry.clip);
-  await withFile(entry.path, "r+", (io) => rotation.applyPlan(io, plan));
+  await withFile(entry.path, "r+", writeFn);
   const relinked = await entry.clip.changeMediaFilePath(entry.path, true);
   if (!relinked) throw new Error("fichier modifié mais impossible de le re-lier : clic droit > Lier le média");
-  return { previous: plan.previous, changed: true, relinked: true };
+  return true;
 }
 
 async function refreshMedia(entry) {
@@ -201,73 +226,203 @@ async function refreshMedia(entry) {
   }
 }
 
+function describeError(e) {
+  return isMissingFileError(e) ? "fichier introuvable (média hors ligne ?)" : errorMessage(e);
+}
+
 /*
- * Applique la rotation `degrees` (0, 90, 180, 270 - sens horaire) à tous les
- * rushs sélectionnés.
+ * Étape 1 (lecture seule) : pour chaque clip, lit la rotation actuelle et
+ * prépare les écritures. Retourne [{ entry, status, previous, plan, error }]
+ * avec status = "todo" | "unchanged" | "error".
+ */
+async function inspectClips(clips, degrees) {
+  return mapLimit(clips, 4, async (entry) => {
+    try {
+      const plan = await withFile(entry.path, "r", (io) => rotation.planRotation(io, degrees));
+      return { entry, status: plan.writes.length ? "todo" : "unchanged", previous: plan.previous, plan };
+    } catch (e) {
+      return { entry, status: "error", previous: null, plan: null, error: describeError(e) };
+    }
+  });
+}
+
+/*
+ * Étape 2 : écrit les rotations préparées puis actualise chaque clip dans Premiere.
+ * Retourne { done, failed, cancelled, timings, operation } ; `operation` est
+ * l'entrée d'historique permettant d'annuler.
+ */
+async function applyRotations(project, items, degrees, options = {}) {
+  const log = options.log || (() => {});
+  const onProgress = options.onProgress || (() => {});
+  const isCancelled = options.isCancelled || (() => false);
+  const result = { done: 0, failed: 0, cancelled: false, timings: { files: 0, refresh: 0 } };
+  const operation = { date: Date.now(), rotation: degrees, files: [] };
+  const todo = items.filter((i) => i.status === "todo");
+
+  for (let i = 0; i < todo.length; i++) {
+    const { entry } = todo[i];
+    if (isCancelled()) {
+      result.cancelled = true;
+      break;
+    }
+    onProgress(i, todo.length, entry.name);
+    try {
+      let t = Date.now();
+      // Le fichier a pu changer depuis l'aperçu : on revérifie juste avant d'écrire.
+      const fresh = await withFile(entry.path, "r", (io) => rotation.planRotation(io, degrees));
+      if (!fresh.writes.length) continue;
+      const relinked = await writeFile(project, entry, (io) => rotation.applyPlan(io, fresh));
+      result.timings.files += Date.now() - t;
+      operation.files.push({
+        path: entry.path,
+        name: entry.name,
+        changes: fresh.writes.map((w) => ({ position: w.position, before: w.before, after: rotation.toHex(w.bytes) })),
+      });
+
+      let refreshed = relinked;
+      if (!refreshed) {
+        t = Date.now();
+        refreshed = await refreshMedia(entry);
+        result.timings.refresh += Date.now() - t;
+      }
+      result.done++;
+      if (refreshed) {
+        log(`${entry.name} : ${rotationLabel(fresh.previous)} → ${rotationLabel(degrees)}`, "ok");
+      } else {
+        log(`${entry.name} : fichier tourné, mais Premiere ne l'a pas actualisé (clic droit > Actualiser le média)`, "warn");
+      }
+      if (i < todo.length - 1) await pause(REFRESH_PAUSE_MS);
+    } catch (e) {
+      result.failed++;
+      log(`${entry.name} : échec - ${describeError(e)}`, "error");
+    }
+  }
+  onProgress(todo.length, todo.length, "");
+  result.operation = operation;
+  return result;
+}
+
+/*
+ * Enchaîne collecte + inspection + (confirmation) + écriture.
  *
  * options :
  *   log(message, level)             messages (level : info | ok | warn | error)
  *   onProgress(done, total, name)   avancement
  *   isCancelled()                   true pour arrêter proprement entre deux clips
+ *   confirm(items)                  aperçu : renvoie les éléments à traiter, ou null pour abandonner
  *
- * Retourne { done, unchanged, failed, cancelled, timings: { collect, files, refresh } } (ms).
+ * Retourne { done, unchanged, failed, cancelled, aborted, timings, operation, items }.
  */
 async function rotateSelection(degrees, options = {}) {
   const log = options.log || (() => {});
-  const onProgress = options.onProgress || (() => {});
-  const isCancelled = options.isCancelled || (() => false);
-  const timings = { collect: 0, files: 0, refresh: 0 };
-  const result = { done: 0, unchanged: 0, failed: 0, cancelled: false, timings };
-
   let t = Date.now();
   const { project, clips, skipped, duplicates } = await collectSelectedClips();
-  timings.collect = Date.now() - t;
+  const timings = { collect: Date.now() - t, files: 0, refresh: 0 };
 
   skipped.forEach((s) => log(`${s.name} : ignoré (${s.reason})`, "warn"));
   if (duplicates) log(`${duplicates} élément(s) partagent un fichier déjà traité (sous-clips, doublons).`, "info");
+  const empty = { done: 0, unchanged: 0, failed: 0, cancelled: false, aborted: false, timings, operation: null, items: [] };
   if (!clips.length) {
     log("Aucun rush MP4/MOV à traiter dans la sélection.", "warn");
-    return result;
+    return empty;
   }
 
-  for (let i = 0; i < clips.length; i++) {
-    const entry = clips[i];
-    if (isCancelled()) {
-      result.cancelled = true;
-      break;
-    }
-    onProgress(i, clips.length, entry.name);
-    try {
-      t = Date.now();
-      const written = await writeRotation(project, entry, degrees);
-      timings.files += Date.now() - t;
+  t = Date.now();
+  let items = await inspectClips(clips, degrees);
+  timings.collect += Date.now() - t;
+  const errors = items.filter((i) => i.status === "error");
+  errors.forEach((i) => log(`${i.entry.name} : échec - ${i.error}`, "error"));
 
-      if (!written.changed) {
-        result.unchanged++;
+  if (options.confirm) {
+    const chosen = await options.confirm(items);
+    if (!chosen) return { ...empty, aborted: true, items };
+    items = chosen;
+  }
+
+  const applied = await applyRotations(project, items, degrees, options);
+  timings.files = applied.timings.files;
+  timings.refresh = applied.timings.refresh;
+  return {
+    done: applied.done,
+    unchanged: items.filter((i) => i.status === "unchanged").length,
+    failed: applied.failed + errors.length,
+    cancelled: applied.cancelled,
+    aborted: false,
+    timings,
+    operation: applied.operation,
+    items,
+  };
+}
+
+/*
+ * Annule une opération de l'historique : remet les octets d'origine dans
+ * chaque fichier (s'il n'a pas été modifié depuis) et actualise les clips.
+ */
+async function undoOperation(operation, options = {}) {
+  const log = options.log || (() => {});
+  const onProgress = options.onProgress || (() => {});
+  const project = await ppro.Project.getActiveProject();
+  if (!project) throw new Error("Aucun projet ouvert.");
+  const clipsByPath = await findClipsByPaths(project, operation.files.map((f) => f.path));
+  const result = { restored: 0, skipped: 0, failed: 0 };
+
+  for (let i = 0; i < operation.files.length; i++) {
+    const file = operation.files[i];
+    onProgress(i, operation.files.length, file.name);
+    const entry = clipsByPath.get(file.path) || { name: file.name, path: file.path, clip: null };
+    try {
+      const status = await withFile(file.path, "r", async (io) => {
+        // Vérification en lecture seule avant d'ouvrir en écriture.
+        for (const c of file.changes) {
+          const current = rotation.toHex(await io.read(c.position, c.before.length / 2));
+          if (current !== c.after && current !== c.before) return "modified";
+        }
+        return "ok";
+      });
+      if (status === "modified") {
+        result.skipped++;
+        log(`${file.name} : modifié depuis, laissé tel quel`, "warn");
         continue;
       }
-
-      let refreshed = written.relinked;
-      if (!refreshed) {
-        t = Date.now();
-        refreshed = await refreshMedia(entry);
-        timings.refresh += Date.now() - t;
+      let outcome = "restored";
+      const write = (io) => rotation.restoreBytes(io, file.changes).then((r) => (outcome = r));
+      const relinked = entry.clip ? await writeFile(project, entry, write) : (await withFile(file.path, "r+", write), false);
+      if (outcome !== "restored") {
+        result.skipped++;
+        continue;
       }
-      result.done++;
-      if (refreshed) {
-        log(`${entry.name} : ${written.previous ?? "?"}° → ${degrees}°`, "ok");
-      } else {
-        log(`${entry.name} : fichier tourné, mais Premiere ne l'a pas actualisé (clic droit > Actualiser le média)`, "warn");
+      if (entry.clip && !relinked) await refreshMedia(entry);
+      result.restored++;
+      log(`${file.name} : rotation d'avant remise`, "ok");
+      if (entry.clip && (await safeHasProxy(entry.clip))) {
+        log(`${file.name} : son proxy est vertical, pense à le recréer ou à désactiver les proxys`, "warn");
       }
-      if (i < clips.length - 1) await pause(REFRESH_PAUSE_MS);
+      if (i < operation.files.length - 1) await pause(REFRESH_PAUSE_MS);
     } catch (e) {
       result.failed++;
-      const reason = isMissingFileError(e) ? "fichier introuvable (média hors ligne ?)" : errorMessage(e);
-      log(`${entry.name} : échec - ${reason}`, "error");
+      log(`${file.name} : échec - ${describeError(e)}`, "error");
     }
   }
-  onProgress(result.cancelled ? result.done + result.unchanged + result.failed : clips.length, clips.length, "");
+  onProgress(operation.files.length, operation.files.length, "");
   return result;
 }
 
-module.exports = { rotateSelection, collectSelectedClips, mapLimit };
+async function safeHasProxy(clip) {
+  try {
+    return await clip.hasProxy();
+  } catch (e) {
+    return false;
+  }
+}
+
+module.exports = {
+  rotateSelection,
+  collectSelectedClips,
+  inspectClips,
+  applyRotations,
+  undoOperation,
+  findClipsByPaths,
+  withFile,
+  mapLimit,
+  pause,
+};

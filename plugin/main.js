@@ -1,8 +1,12 @@
 "use strict";
 
-const { entrypoints } = require("uxp");
-const { rotateSelection } = require("./src/premiere.js");
+const { entrypoints, storage: uxpStorage } = require("uxp");
+const ppro = require("premierepro");
+const fs = require("fs");
+const premiere = require("./src/premiere.js");
+const rotation = require("./src/mp4rotation.js");
 const settings = require("./src/settings.js");
+const { createProxyQueue } = require("./src/proxies.js");
 
 const MAX_LOG_LINES = 300;
 
@@ -52,14 +56,23 @@ function setSummary(text) {
   $("summary").textContent = text;
 }
 
+function errorMessage(e) {
+  return e && e.message ? e.message : String(e);
+}
+
 /* ---------- Progression ---------- */
+
+function setDisabled(el, disabled) {
+  if (disabled) el.setAttribute("disabled", "");
+  else el.removeAttribute("disabled");
+}
 
 function setBusy(value) {
   busy = value;
   if (value) $("progress").classList.remove("hidden");
   else $("progress").classList.add("hidden");
-  const buttons = [$("rotate-default"), ...document.querySelectorAll("[data-rotation]")];
-  buttons.forEach((b) => (value ? b.setAttribute("disabled", "") : b.removeAttribute("disabled")));
+  [$("rotate-default"), $("make-proxies"), ...document.querySelectorAll("[data-rotation]")].forEach((b) => setDisabled(b, value));
+  renderUndo();
 }
 
 // Mise à jour de la barre limitée à ~10 fois par seconde pour ne pas surcharger l'interface.
@@ -72,37 +85,17 @@ function onProgress(done, total, name) {
   $("progress-label").textContent = name ? `${done + 1}/${total} · ${name}` : `${done}/${total}`;
 }
 
-function formatSummary(degrees, r, elapsed) {
-  const parts = [`${r.done} tourné(s)`];
-  if (r.unchanged) parts.push(`${r.unchanged} déjà à ${degrees}°`);
-  if (r.failed) parts.push(`${r.failed} échec(s)`);
-  const seconds = (elapsed / 1000).toFixed(1);
-  return `${r.cancelled ? "Annulé" : "Terminé"} en ${seconds} s : ${parts.join(", ")}.`;
-}
-
-/* ---------- Action principale ---------- */
-
-async function runRotation(degrees) {
+/* Exécute une tâche longue avec la barre de progression et le bouton Arrêter. */
+async function runTask(label, task) {
   if (busy) return null;
   cancelRequested = false;
   setBusy(true);
   onProgress(0, 0, "");
-  setSummary("Analyse de la sélection…");
-  const started = Date.now();
+  setSummary(label);
   try {
-    const result = await rotateSelection(degrees, {
-      log,
-      onProgress,
-      isCancelled: () => cancelRequested,
-    });
-    const t = result.timings;
-    const summary = formatSummary(degrees, result, Date.now() - started);
-    setSummary(summary);
-    log(summary, result.failed ? "warn" : "ok");
-    log(`Détail : sélection ${t.collect} ms · fichiers ${t.files} ms · actualisation Premiere ${t.refresh} ms`, "info");
-    return { ok: !result.failed, message: summary };
+    return await task();
   } catch (e) {
-    const message = e && e.message ? e.message : String(e);
+    const message = errorMessage(e);
     setSummary(message);
     log(message, "error");
     return { ok: false, message };
@@ -111,45 +104,311 @@ async function runRotation(degrees) {
   }
 }
 
-/* Petite boîte de dialogue, utilisée quand l'action est lancée depuis le menu. */
-async function showMessage(text) {
+/* ---------- Boîtes de dialogue ---------- */
+
+async function showDialog(build, size) {
   const dialog = document.createElement("dialog");
-  dialog.innerHTML = `
-    <sp-body size="S"></sp-body>
-    <footer><sp-button variant="cta" id="ok">OK</sp-button></footer>`.trim();
-  dialog.querySelector("sp-body").textContent = text;
-  dialog.querySelector("#ok").addEventListener("click", () => dialog.close());
+  build(dialog);
   document.body.appendChild(dialog);
   try {
-    await dialog.uxpShowModal({ title: "Rotate", resize: "none", size: { width: 320, height: 160 } });
+    return await dialog.uxpShowModal({ title: "Rotate", resize: "both", size });
+  } catch (e) {
+    return undefined; // fermée avec Échap
   } finally {
     dialog.remove();
   }
 }
 
+function showMessage(text) {
+  return showDialog((dialog) => {
+    dialog.innerHTML = `
+      <div class="preview">
+        <sp-body size="S"></sp-body>
+        <footer><sp-button variant="cta" id="ok">OK</sp-button></footer>
+      </div>`.trim();
+    dialog.querySelector("sp-body").textContent = text;
+    dialog.querySelector("#ok").addEventListener("click", () => dialog.close("ok"));
+  }, { width: 340, height: 170 });
+}
+
+async function confirmDialog(text, okLabel, cancelLabel = "Annuler") {
+  const answer = await showDialog((dialog) => {
+    dialog.innerHTML = `
+      <div class="preview">
+        <sp-body size="S"></sp-body>
+        <footer>
+          <sp-button variant="secondary" id="no">Annuler</sp-button>
+          <sp-button variant="cta" id="yes"></sp-button>
+        </footer>
+      </div>`.trim();
+    dialog.querySelector("sp-body").textContent = text;
+    dialog.querySelector("#yes").textContent = okLabel;
+    dialog.querySelector("#no").textContent = cancelLabel;
+    dialog.querySelector("#yes").addEventListener("click", () => dialog.close("yes"));
+    dialog.querySelector("#no").addEventListener("click", () => dialog.close("no"));
+  }, { width: 360, height: 180 });
+  return answer === "yes";
+}
+
+/*
+ * Aperçu avant validation : liste des rushs avec leur sens actuel, ceux à
+ * tourner sont cochés. Renvoie les éléments cochés, ou null si abandon.
+ */
+async function previewDialog(items, degrees) {
+  const todo = items.filter((i) => i.status === "todo");
+  const unchanged = items.filter((i) => i.status === "unchanged");
+  const errors = items.filter((i) => i.status === "error");
+  if (!todo.length) return items; // rien à tourner : pas besoin de demander
+
+  const answer = await showDialog((dialog) => {
+    dialog.innerHTML = `
+      <div class="preview">
+        <sp-body size="S" id="intro"></sp-body>
+        <sp-checkbox id="all" checked>Tout cocher</sp-checkbox>
+        <div class="preview-list" id="list"></div>
+        <footer>
+          <sp-button variant="secondary" id="no">Annuler</sp-button>
+          <sp-button variant="cta" id="yes"></sp-button>
+        </footer>
+      </div>`.trim();
+    const parts = [`${todo.length} rush(s) à tourner en ${settings.rotationLabel(degrees)}`];
+    if (unchanged.length) parts.push(`${unchanged.length} déjà dans ce sens`);
+    if (errors.length) parts.push(`${errors.length} illisible(s)`);
+    dialog.querySelector("#intro").textContent = parts.join(" · ");
+
+    const list = dialog.querySelector("#list");
+    const boxes = [];
+    const itemOf = new Map();
+    for (const item of todo) {
+      const box = document.createElement("sp-checkbox");
+      box.setAttribute("checked", "");
+      box.textContent = `${item.entry.name}   ${settings.rotationLabel(item.previous)} → ${settings.rotationLabel(degrees)}`;
+      itemOf.set(box, item);
+      list.appendChild(box);
+      boxes.push(box);
+    }
+    for (const item of unchanged) {
+      const line = document.createElement("div");
+      line.className = "line muted";
+      line.textContent = `${item.entry.name}   déjà ${settings.rotationLabel(degrees)}`;
+      list.appendChild(line);
+    }
+    for (const item of errors) {
+      const line = document.createElement("div");
+      line.className = "line error";
+      line.textContent = `${item.entry.name}   ${item.error}`;
+      list.appendChild(line);
+    }
+
+    const yes = dialog.querySelector("#yes");
+    const isChecked = (b) => b.checked === true || (b.checked === undefined && b.hasAttribute("checked"));
+    const update = () => {
+      const n = boxes.filter(isChecked).length;
+      yes.textContent = n ? `Tourner ${n} rush(s)` : "Rien de coché";
+      setDisabled(yes, n === 0);
+    };
+    boxes.forEach((b) => b.addEventListener("change", update));
+    dialog.querySelector("#all").addEventListener("change", (e) => {
+      boxes.forEach((b) => {
+        b.checked = e.target.checked;
+        if (e.target.checked) b.setAttribute("checked", "");
+        else b.removeAttribute("checked");
+      });
+      update();
+    });
+    update();
+    yes.addEventListener("click", () => dialog.close(boxes.filter(isChecked).map((b) => itemOf.get(b))));
+    dialog.querySelector("#no").addEventListener("click", () => dialog.close(null));
+  }, { width: 440, height: 440 });
+
+  return Array.isArray(answer) ? [...answer, ...unchanged] : null;
+}
+
+/* ---------- Historique / annulation ---------- */
+
+function describeOperation(op) {
+  const time = new Date(op.date);
+  const hh = String(time.getHours()).padStart(2, "0");
+  const mm = String(time.getMinutes()).padStart(2, "0");
+  return `${op.files.length} rush(s) → ${settings.rotationLabel(op.rotation)} (${hh}:${mm})`;
+}
+
+function renderUndo() {
+  const last = settings.lastHistory(storage);
+  const button = $("undo");
+  setDisabled(button, busy || !last);
+  button.textContent = last ? `Annuler : ${describeOperation(last)}` : "Annuler la dernière opération";
+}
+
+async function undoLast(fromMenu) {
+  const last = settings.lastHistory(storage);
+  if (!last) {
+    if (fromMenu) await showMessage("Aucune opération à annuler.");
+    return;
+  }
+  const question = `Annuler la dernière opération (${describeOperation(last)}) ? Ces rushs retrouveront leur sens d'avant.`;
+  if (!(await confirmDialog(question, "Annuler l'opération", "Garder"))) return;
+  const result = await runTask("Annulation en cours…", async () => {
+    const r = await premiere.undoOperation(last, { log, onProgress });
+    settings.popHistory(storage);
+    const parts = [`${r.restored} remis comme avant`];
+    if (r.skipped) parts.push(`${r.skipped} laissé(s) tel quel (modifié depuis)`);
+    if (r.failed) parts.push(`${r.failed} échec(s)`);
+    const message = `Annulation terminée : ${parts.join(", ")}.`;
+    setSummary(message);
+    log(message, r.failed ? "warn" : "ok");
+    return { ok: !r.failed, message };
+  });
+  renderUndo();
+  if (fromMenu && result && !result.ok) await showMessage(result.message);
+}
+
+/* ---------- Rotation ---------- */
+
+function formatSummary(degrees, r, elapsed) {
+  const parts = [`${r.done} tourné(s)`];
+  if (r.unchanged) parts.push(`${r.unchanged} déjà à ${settings.rotationLabel(degrees)}`);
+  if (r.failed) parts.push(`${r.failed} échec(s)`);
+  const seconds = (elapsed / 1000).toFixed(1);
+  return `${r.cancelled ? "Arrêté" : "Terminé"} en ${seconds} s : ${parts.join(", ")}.`;
+}
+
+async function runRotation(degrees) {
+  const started = Date.now();
+  return runTask("Analyse de la sélection…", async () => {
+    const usePreview = settings.getBool(storage, "preview", true);
+    const result = await premiere.rotateSelection(degrees, {
+      log,
+      onProgress,
+      isCancelled: () => cancelRequested,
+      confirm: usePreview ? (items) => previewDialog(items, degrees) : null,
+    });
+    if (result.aborted) {
+      setSummary("Rotation annulée, aucun fichier modifié.");
+      return { ok: true, message: "" };
+    }
+    if (result.operation) settings.pushHistory(storage, result.operation);
+
+    const t = result.timings;
+    const summary = formatSummary(degrees, result, Date.now() - started);
+    setSummary(summary);
+    log(summary, result.failed ? "warn" : "ok");
+    log(`Détail : sélection ${t.collect} ms · fichiers ${t.files} ms · actualisation Premiere ${t.refresh} ms`, "info");
+
+    // Proxys automatiques pour les rushs qui viennent d'être tournés.
+    if (degrees !== 0 && result.operation && result.operation.files.length && settings.getBool(storage, "autoProxy", false)) {
+      const paths = new Set(result.operation.files.map((f) => f.path));
+      await startProxies(result.items.filter((i) => paths.has(i.entry.path)).map((i) => i.entry));
+    }
+    if (degrees === 0 && result.done) {
+      log("Si ces rushs avaient des proxys verticaux, désactive les proxys ou recrée-les.", "info");
+    }
+    return { ok: !result.failed, message: summary };
+  });
+}
+
 // Depuis le menu, on reste silencieux si tout s'est bien passé : on ne prévient qu'en cas de souci.
 async function runFromMenu(degrees) {
-  if (busy) return showMessage("Une rotation est déjà en cours.");
+  if (busy) return showMessage("Une opération est déjà en cours.");
   const result = await runRotation(degrees);
+  renderUndo();
   if (result && !result.ok) await showMessage(result.message);
 }
 
-/* ---------- Sens par défaut ---------- */
+/* ---------- Proxys ---------- */
+
+const proxies = createProxyQueue({
+  ppro,
+  fs,
+  rotation,
+  withFile: premiere.withFile,
+  findClipsByPaths: premiere.findClipsByPaths,
+  load: () => settings.getJSON(storage, "pendingProxies", []),
+  save: (list) => settings.setJSON(storage, "pendingProxies", list),
+  log,
+  onChange: (count) => {
+    $("proxy-status").textContent = count
+      ? `${count} proxy(s) en cours dans Media Encoder, attachés automatiquement à la fin.`
+      : "";
+  },
+});
+
+function renderPreset() {
+  const preset = settings.getString(storage, "proxyPreset");
+  const name = preset ? preset.split(/[\\/]/).pop() : "aucun";
+  $("preset-name").textContent = name;
+}
+
+let picking = false;
+async function choosePreset() {
+  if (picking) return; // évite la boucle de clics connue des sélecteurs de fichiers UXP
+  picking = true;
+  try {
+    const file = await uxpStorage.localFileSystem.getFileForOpening({ types: ["epr"] });
+    if (file && file.nativePath) {
+      settings.setString(storage, "proxyPreset", file.nativePath);
+      renderPreset();
+      log(`Préréglage de proxy : ${file.name}`, "ok");
+    }
+  } catch (e) {
+    log(`Sélection du préréglage impossible : ${errorMessage(e)}`, "error");
+  } finally {
+    setTimeout(() => (picking = false), 300);
+  }
+}
+
+async function startProxies(entries) {
+  const preset = settings.getString(storage, "proxyPreset");
+  if (!preset) {
+    log("Proxys : choisis d'abord un préréglage vertical (.epr), voir le README.", "warn");
+    return 0;
+  }
+  if (!entries.length) return 0;
+  const queued = await proxies.create(entries, preset);
+  if (queued) log(`${queued} proxy(s) envoyé(s) à Media Encoder.`, "ok");
+  return queued;
+}
+
+async function makeProxiesForSelection() {
+  await runTask("Recherche des rushs tournés…", async () => {
+    const { clips } = await premiere.collectSelectedClips();
+    // On ne fait des proxys verticaux que pour les rushs déjà tournés.
+    const items = await premiere.inspectClips(clips, 0);
+    const rotated = items.filter((i) => i.status === "todo").map((i) => i.entry);
+    const horizontal = items.filter((i) => i.status === "unchanged").length;
+    if (horizontal) log(`${horizontal} rush(s) horizontaux ignorés (tourne-les d'abord).`, "info");
+    if (!rotated.length) {
+      setSummary("Aucun rush tourné dans la sélection.");
+      return { ok: true, message: "" };
+    }
+    const queued = await startProxies(rotated);
+    setSummary(queued ? `${queued} proxy(s) en cours dans Media Encoder.` : "Aucun proxy lancé.");
+    return { ok: queued > 0, message: "" };
+  });
+}
+
+/* ---------- Sens par défaut et options ---------- */
+
+function setChecked(el, value) {
+  el.checked = value;
+  if (value) el.setAttribute("checked", "");
+  else el.removeAttribute("checked");
+}
 
 function renderDefault() {
   $("rotate-default").textContent = `Tourner en vertical  ${settings.rotationLabel(defaultRotation)}`;
   document.querySelectorAll("#default-choice sp-radio").forEach((radio) => {
-    if (Number(radio.getAttribute("value")) === defaultRotation) radio.setAttribute("checked", "");
-    else radio.removeAttribute("checked");
+    setChecked(radio, Number(radio.getAttribute("value")) === defaultRotation);
   });
 }
 
 /* ---------- Événements ---------- */
 
-$("rotate-default").addEventListener("click", () => runRotation(defaultRotation));
+$("rotate-default").addEventListener("click", () => runRotation(defaultRotation).then(renderUndo));
+$("undo").addEventListener("click", () => undoLast(false));
 $("cancel").addEventListener("click", () => {
   cancelRequested = true;
-  $("progress-label").textContent = "Annulation après le clip en cours…";
+  $("progress-label").textContent = "Arrêt après le clip en cours…";
 });
 $("clear-log").addEventListener("click", () => ($("log").textContent = ""));
 
@@ -157,12 +416,21 @@ $("default-choice").addEventListener("change", (event) => {
   defaultRotation = settings.setDefaultRotation(storage, Number(event.target.value));
   renderDefault();
 });
+$("opt-preview").addEventListener("change", (e) => settings.setBool(storage, "preview", e.target.checked));
+$("opt-auto-proxy").addEventListener("change", (e) => settings.setBool(storage, "autoProxy", e.target.checked));
+$("choose-preset").addEventListener("click", choosePreset);
+$("make-proxies").addEventListener("click", makeProxiesForSelection);
 
 document.querySelectorAll("[data-rotation]").forEach((button) => {
-  button.addEventListener("click", () => runRotation(Number(button.getAttribute("data-rotation"))));
+  button.addEventListener("click", () => runRotation(Number(button.getAttribute("data-rotation"))).then(renderUndo));
 });
 
+setChecked($("opt-preview"), settings.getBool(storage, "preview", true));
+setChecked($("opt-auto-proxy"), settings.getBool(storage, "autoProxy", false));
 renderDefault();
+renderPreset();
+renderUndo();
+proxies.resume();
 
 /* ---------- Entrées du menu Fenêtre > Plugins UXP > Rotate ---------- */
 
@@ -175,5 +443,6 @@ entrypoints.setup({
   commands: {
     rotateDefault: () => runFromMenu(defaultRotation),
     rotateReset: () => runFromMenu(0),
+    rotateUndo: () => undoLast(true),
   },
 });

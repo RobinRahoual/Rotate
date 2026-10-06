@@ -8,13 +8,16 @@
     <div class="panel">
       <div class="header">
         <sp-button id="rotate-default" variant="cta">Tourner en vertical</sp-button>
+        <div class="row header-row">
+          <sp-action-button id="undo" quiet disabled>Annuler la dernière opération</sp-action-button>
+        </div>
         <div id="progress" class="progress hidden">
           <sp-progressbar id="progress-bar" max="100" value="0" size="small">
             <sp-label slot="label" id="progress-label">Traitement…</sp-label>
           </sp-progressbar>
-          <sp-action-button id="cancel" quiet>Annuler</sp-action-button>
+          <sp-action-button id="cancel" quiet>Arrêter</sp-action-button>
         </div>
-        <sp-body size="XS" id="summary" class="summary">Sélectionne des rushs ou des chutiers dans le panneau Projet.</sp-body>
+        <sp-body size="XS" id="summary" class="muted">Sélectionne des rushs ou des chutiers dans le panneau Projet.</sp-body>
       </div>
 
       <div class="scroll">
@@ -25,6 +28,7 @@
             <sp-radio value="90">↻ +90° (horaire)</sp-radio>
             <sp-radio value="180">180°</sp-radio>
           </sp-radio-group>
+          <sp-checkbox id="opt-preview">Aperçu avant de tourner</sp-checkbox>
         </div>
 
         <div class="section">
@@ -37,6 +41,17 @@
           <div class="row">
             <sp-action-button data-rotation="0">Horizontal d'origine</sp-action-button>
           </div>
+        </div>
+
+        <div class="section">
+          <sp-detail>PROXYS VERTICAUX (LECTURE FLUIDE)</sp-detail>
+          <sp-body size="XS" class="muted">Préréglage : <span id="preset-name">aucun</span></sp-body>
+          <div class="row">
+            <sp-action-button id="choose-preset">Choisir le préréglage…</sp-action-button>
+            <sp-action-button id="make-proxies">Créer les proxys de la sélection</sp-action-button>
+          </div>
+          <sp-checkbox id="opt-auto-proxy">Créer les proxys après chaque rotation</sp-checkbox>
+          <sp-body size="XS" id="proxy-status" class="muted"></sp-body>
         </div>
 
         <div class="section">

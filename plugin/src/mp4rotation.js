@@ -189,10 +189,24 @@ async function getRotation(io) {
   return matrixToRotation(tracks[0].matrix);
 }
 
+function toHex(bytes) {
+  let out = "";
+  for (const b of bytes) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
+function fromHex(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return bytes;
+}
+
 /*
  * Prépare une rotation absolue (0, 90, 180 ou 270 degrés, sens horaire) en
  * lecture seule. Retourne { previous, rotation, writes } : `writes` est vide si
  * le fichier est déjà dans le bon sens (aucune écriture nécessaire).
+ * Chaque écriture garde les octets d'origine (`before`, hexadécimal) pour
+ * pouvoir annuler exactement.
  */
 async function planRotation(io, degrees) {
   const tracks = await findVideoTracks(io);
@@ -200,7 +214,11 @@ async function planRotation(io, degrees) {
   for (const track of tracks) {
     const target = buildMatrix(degrees, track.width, track.height);
     if (target.every((v, i) => v === track.matrix[i])) continue;
-    writes.push({ position: track.matrixPosition, bytes: encodeMatrix(target) });
+    writes.push({
+      position: track.matrixPosition,
+      bytes: encodeMatrix(target),
+      before: toHex(encodeMatrix(track.matrix)),
+    });
   }
   return { previous: matrixToRotation(tracks[0].matrix), rotation: degrees, writes };
 }
@@ -216,6 +234,39 @@ async function setRotation(io, degrees) {
   return { previous: plan.previous, rotation: degrees, changed: plan.writes.length > 0 };
 }
 
+/*
+ * Annulation : remet les octets d'origine (`before`) à chaque position, mais
+ * seulement si le fichier contient toujours ce que le plugin y a écrit
+ * (`after`). Sinon le fichier a été modifié entre-temps : on n'y touche pas.
+ * changes : [{ position, before, after }] (hexadécimal). Retourne "restored" | "unchanged" | "modified".
+ */
+async function restoreBytes(io, changes) {
+  let alreadyRestored = 0;
+  for (const c of changes) {
+    const current = toHex(await io.read(c.position, c.before.length / 2));
+    if (current === c.before) alreadyRestored++;
+    else if (current !== c.after) return "modified";
+  }
+  if (alreadyRestored === changes.length) return "unchanged";
+  for (const c of changes) await io.write(c.position, fromHex(c.before));
+  return "restored";
+}
+
+/*
+ * Vrai si le fichier est un MP4/MOV complet (boîte "moov" présente et
+ * structure lisible jusqu'au bout). Sert à savoir si Media Encoder a fini
+ * d'écrire un proxy : tant que l'encodage tourne, le "moov" n'existe pas encore.
+ */
+async function isComplete(io) {
+  try {
+    const size = await io.size();
+    const boxes = await findBoxes(io, 0, size, ["moov"], false);
+    return boxes.length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
 module.exports = {
   ROTATIONS,
   SUPPORTED_EXTENSIONS,
@@ -224,6 +275,9 @@ module.exports = {
   planRotation,
   applyPlan,
   setRotation,
+  restoreBytes,
+  isComplete,
+  toHex,
   // exportés pour les tests
   buildMatrix,
   matrixToRotation,
