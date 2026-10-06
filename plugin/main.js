@@ -864,7 +864,7 @@ renderProxyBanner();
   } catch (e) {
     version = "";
   }
-  log(`Rotate ${manifest.version} · gratuit · par @robin.rahoual${version ? ` · ${version}` : ""}`, "info");
+  log(`Rotate ${manifest.version} · plugin par @robin.rahoual sur Instagram${version ? ` · ${version}` : ""}`, "info");
   if (missingRequired.length) {
     status.finish("error", "Plugin à mettre à jour", `Cette version de Premiere ne fournit plus : ${missingRequired.join(", ")}.`);
     log(`Fonctions Premiere manquantes : ${missingRequired.join(", ")}`, "error");
