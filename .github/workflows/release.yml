@@ -15,6 +15,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -22,8 +23,17 @@ jobs:
         with:
           node-version: 22
 
+      # Sans réindexation des pages de manuel (qui peut prendre de longues minutes) ni paquets suggérés.
       - name: Installer ffmpeg (tests)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+        timeout-minutes: 8
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          echo "set man-db/auto-update false" | sudo debconf-communicate >/dev/null || true
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
 
       - name: Tests
         run: npm test
