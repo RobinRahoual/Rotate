@@ -5,7 +5,7 @@ Plugin gratuit créé par **Robin Rahoual** — suis-moi sur Instagram : [@robin
 Passe tes rushs filmés à la verticale (Sony A7 III, etc.) **en vertical directement dans Premiere Pro**,
 sans ré-export, sans doublon de fichier et sans perte de qualité.
 
-**[⬇ Télécharger Rotate](https://github.com/VittelRobin/Rotate/releases/latest)** — fichier `.ccx`, double-clic pour l'installer.
+**[⬇ Télécharger Rotate](https://github.com/RobinRahoual/Rotate/releases/latest)** — fichier `.ccx`, double-clic pour l'installer.
 
 ## Comment ça marche
 
@@ -28,7 +28,7 @@ vertical (ex. 2160×3840) dans le chutier, le moniteur source et les nouvelles s
 ### Installation durable (recommandée)
 
 1. Télécharge le fichier `Rotate-<version>.ccx` depuis la
-   [dernière release](https://github.com/VittelRobin/Rotate/releases/latest) (section *Assets*).
+   [dernière release](https://github.com/RobinRahoual/Rotate/releases/latest) (section *Assets*).
 2. **Double-clique** dessus : l'application Creative Cloud s'ouvre et l'installe (elle prévient que le
    plugin ne vient pas de la Marketplace : clique sur *Installer*).
 3. Dans Premiere : *Fenêtre > Plugins UXP > Rotate*.
