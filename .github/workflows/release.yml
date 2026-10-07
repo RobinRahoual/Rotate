@@ -1,0 +1,71 @@
+# Publie une Release GitHub avec le fichier d'installation Rotate-<version>.ccx
+# à chaque tag « v… » (ex. v0.7.0). Le paquet n'est publié que si les tests passent.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Installer ffmpeg (tests)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Tests
+        run: npm test
+
+      - name: Fabriquer le paquet .ccx
+        id: package
+        run: |
+          npm run -s package
+          VERSION=$(node -p "require('./plugin/manifest.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "file=dist/Rotate-$VERSION.ccx" >> "$GITHUB_OUTPUT"
+
+      - name: Vérifier que le tag correspond à la version du plugin
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "v${{ steps.package.outputs.version }}" ]; then
+            echo "Le tag ${GITHUB_REF_NAME} ne correspond pas à la version du manifeste (v${{ steps.package.outputs.version }})."
+            exit 1
+          fi
+
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.package.outputs.version }}
+          FILE: ${{ steps.package.outputs.file }}
+        run: |
+          TAG="v$VERSION"
+          NOTES=$(cat <<'EOF'
+          ## Installer Rotate
+
+          1. Télécharge **Rotate-VERSION.ccx** ci-dessous (section *Assets*).
+          2. Double-clique dessus : l'application Creative Cloud l'installe (clique sur *Installer* à l'avertissement « plugin hors Marketplace »).
+          3. Dans Premiere Pro (25.6 ou plus récent) : *Fenêtre > Plugins UXP > Rotate*.
+
+          Pour mettre à jour : désinstalle l'ancienne version (Creative Cloud > *Gérer les plugins*) puis installe la nouvelle.
+
+          Plugin gratuit par [@robin.rahoual](https://www.instagram.com/robin.rahoual/) sur Instagram.
+          EOF
+          )
+          NOTES="${NOTES//VERSION/$VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$FILE" --clobber
+          else
+            gh release create "$TAG" "$FILE" --title "Rotate $VERSION" --notes "$NOTES" --target "$GITHUB_SHA"
+          fi

@@ -5,6 +5,8 @@ Plugin gratuit créé par **Robin Rahoual** — suis-moi sur Instagram : [@robin
 Passe tes rushs filmés à la verticale (Sony A7 III, etc.) **en vertical directement dans Premiere Pro**,
 sans ré-export, sans doublon de fichier et sans perte de qualité.
 
+**[⬇ Télécharger Rotate](https://github.com/VittelRobin/Rotate/releases/latest)** — fichier `.ccx`, double-clic pour l'installer.
+
 ## Comment ça marche
 
 Un fichier MP4/MOV contient, dans son en-tête, une petite **matrice d'affichage** (36 octets) qui dit au
@@ -25,7 +27,8 @@ vertical (ex. 2160×3840) dans le chutier, le moniteur source et les nouvelles s
 
 ### Installation durable (recommandée)
 
-1. Récupère le fichier `Rotate-<version>.ccx` (ou fabrique-le : `npm run package` → dossier `dist/`).
+1. Télécharge le fichier `Rotate-<version>.ccx` depuis la
+   [dernière release](https://github.com/VittelRobin/Rotate/releases/latest) (section *Assets*).
 2. **Double-clique** dessus : l'application Creative Cloud s'ouvre et l'installe (elle prévient que le
    plugin ne vient pas de la Marketplace : clique sur *Installer*).
 3. Dans Premiere : *Fenêtre > Plugins UXP > Rotate*.
@@ -213,6 +216,13 @@ Le préréglage des proxys est recréé automatiquement s'il ne fonctionne plus.
 npm test          # nécessite Node 18+ et ffmpeg/ffprobe
 npm run package   # fabrique dist/Rotate-<version>.ccx
 ```
+
+### Publier une nouvelle version
+
+Change `version` dans `plugin/manifest.json` (et `package.json`), puis pousse un tag du même numéro
+(`git tag v0.8.0 && git push origin v0.8.0`). GitHub Actions lance les tests, fabrique le `.ccx` et
+publie la release (`.github/workflows/release.yml`). On peut aussi lancer le workflow *Release* à la main
+depuis l'onglet *Actions*.
 
 Les tests génèrent de vrais MP4/MOV avec ffmpeg, appliquent les rotations et vérifient avec ffprobe que
 la rotation est bien lue, que les flux audio/vidéo sont identiques au bit près et que le retour à 0°
