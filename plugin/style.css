@@ -70,6 +70,7 @@ body {
 .status.warn { border-left-color: var(--warn); }
 .status.error { border-left-color: var(--error); }
 .status.idle { background-color: transparent; padding-left: 0; border-left-color: transparent; }
+.status.idle .status-icon { display: none; }
 
 .status-top {
   display: flex;
@@ -151,9 +152,11 @@ body {
   margin: 4px 0 0;
 }
 
-.section sp-checkbox {
-  display: block;
-  margin-top: 4px;
+/* Les cases à cocher restent en ligne dans leur propre conteneur : forcées en
+   « display: block », elles affichent leur texte sous la case dans Premiere et
+   débordent sur les éléments suivants. */
+.field {
+  margin-top: 6px;
 }
 
 /* ---------- Boîte d'aperçu ---------- */
@@ -172,11 +175,13 @@ body {
   border: 1px solid var(--border);
 }
 
-.preview-list sp-checkbox,
-.preview-list .line {
-  display: block;
-  font-size: 12px;
+.preview-list .check {
   margin: 1px 0;
+}
+
+.preview-list .line {
+  font-size: 12px;
+  margin: 2px 0;
 }
 
 .preview-list .error {

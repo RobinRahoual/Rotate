@@ -306,7 +306,7 @@ async function checklistDialog(options) {
     dialog.innerHTML = `
       <div class="preview">
         <sp-body size="S" id="intro"></sp-body>
-        <sp-checkbox id="all" checked>Tout cocher</sp-checkbox>
+        <div class="field"><sp-checkbox id="all" checked>Tout cocher</sp-checkbox></div>
         <div class="preview-list" id="list"></div>
         <footer>
           <sp-button variant="secondary" id="no"></sp-button>
@@ -322,11 +322,14 @@ async function checklistDialog(options) {
     const shown = options.items.slice(0, MAX_CHECKLIST_ITEMS);
     const hidden = options.items.slice(MAX_CHECKLIST_ITEMS).map((item) => item.value);
     for (const item of shown) {
+      const row = document.createElement("div");
+      row.className = "check";
       const box = document.createElement("sp-checkbox");
       box.setAttribute("checked", "");
       box.textContent = item.label;
       valueOf.set(box, item.value);
-      list.appendChild(box);
+      row.appendChild(box);
+      list.appendChild(row);
       boxes.push(box);
     }
     const addLine = (text, className) => {

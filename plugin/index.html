@@ -36,7 +36,7 @@
             <sp-radio value="90">↻ +90° (horaire)</sp-radio>
             <sp-radio value="180">180°</sp-radio>
           </sp-radio-group>
-          <sp-checkbox id="opt-preview">Aperçu avant de tourner</sp-checkbox>
+          <div class="field"><sp-checkbox id="opt-preview">Aperçu avant de tourner</sp-checkbox></div>
         </div>
 
         <div class="section">
@@ -56,7 +56,7 @@
           <div class="row">
             <sp-action-button id="make-proxies">Créer les proxys de la sélection</sp-action-button>
           </div>
-          <sp-checkbox id="opt-auto-proxy">Créer les proxys après chaque rotation</sp-checkbox>
+          <div class="field"><sp-checkbox id="opt-auto-proxy">Créer les proxys après chaque rotation</sp-checkbox></div>
           <div class="row row-top">
             <sp-action-button id="clean-proxies">Analyser et nettoyer les proxys</sp-action-button>
           </div>
@@ -84,7 +84,7 @@
 
         <div class="section">
           <sp-detail>SIGNAL DE FIN</sp-detail>
-          <sp-checkbox id="opt-end-sound">Jouer un son à la fin</sp-checkbox>
+          <div class="field"><sp-checkbox id="opt-end-sound">Jouer un son à la fin</sp-checkbox></div>
           <sp-body size="XS" class="muted">Pour les opérations de plus de 8 s et quand les proxys sont prêts : le panneau passe au premier plan et le bilan clignote.</sp-body>
           <div class="row row-top"><sp-action-button id="test-signal" quiet>Tester le signal</sp-action-button></div>
         </div>
