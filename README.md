@@ -126,6 +126,21 @@ Quand une opération dure plus de 8 secondes, ou quand un lot de proxys est prê
 premier plan, le bilan clignote et un petit son est joué (désactivable : *Jouer un son à la fin*).
 *Tester le signal* permet de l'essayer.
 
+### Mode réduit
+
+Le bouton **▴ Réduire** (en haut à droite) replie tous les réglages : il ne reste que le crédit, le bouton
+principal et l'état de l'opération. Tu peux alors rapetisser la fenêtre. **▾ Réglages** les réaffiche.
+Le choix est mémorisé. (Premiere ne permet pas à un plugin de réduire lui-même sa fenêtre.)
+
+### Mises à jour
+
+Au démarrage, le plugin vérifie sur GitHub (au plus une fois toutes les 6 heures) si une nouvelle version
+est publiée. Si oui, un bandeau propose **Télécharger** (le pack d'installation), **Nouveautés** ou
+**Plus tard** (masque cette version). Un plugin ne peut pas s'installer lui-même : après le
+téléchargement, décompresse le pack et lance le script d'installation (ou double-clique sur le `.ccx`).
+Section *Mises à jour* des réglages : version installée, vérification au démarrage (désactivable) et
+**Vérifier maintenant**. Nécessite que le dépôt GitHub soit public.
+
 ### Garder le panneau sous la main
 
 Plutôt que de laisser le panneau flottant (une fenêtre flottante réduite est facile à perdre), **ancre-le**
@@ -253,6 +268,7 @@ plugin/
   src/compat.js        vérification de compatibilité avec la version de Premiere
   src/shortcuts.js     raccourcis clavier du panneau
   src/cleanup.js       analyse et suppression des proxys inutilisés
+  src/updates.js       vérification des nouvelles versions sur GitHub
   assets/done.mp4      son de fin (0,7 s)
   assets/calibration.mp4  vidéo de 1 s (4 Ko) pour l'encodage test du préréglage
   test/                tests Node + ffmpeg

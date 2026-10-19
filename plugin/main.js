@@ -13,6 +13,7 @@ const presets = require("./src/presets.js");
 const { checkCompatibility } = require("./src/compat.js");
 const shortcutKeys = require("./src/shortcuts.js");
 const cleanup = require("./src/cleanup.js");
+const updates = require("./src/updates.js");
 
 const INSTAGRAM_URL = "https://www.instagram.com/robin.rahoual/";
 const LONG_TASK_MS = 8000; // au-delà, signal de fin
@@ -789,13 +790,61 @@ function onKeyDown(event) {
 
 /* ---------- Instagram ---------- */
 
-async function openInstagram() {
-  try {
-    const error = await uxp.shell.openExternal(INSTAGRAM_URL, "Ouvrir le profil Instagram de @robin.rahoual");
-    if (error) log(`Impossible d'ouvrir Instagram : ${error}`, "warn");
-  } catch (e) {
-    log(`Impossible d'ouvrir Instagram : ${errorMessage(e)}`, "warn");
+function openInstagram() {
+  return openUrl(INSTAGRAM_URL, "Ouvrir le profil Instagram de @robin.rahoual");
+}
+
+/* ---------- Mode réduit ---------- */
+
+function applyCompact(compact) {
+  const panel = document.querySelector(".panel");
+  if (compact) panel.classList.add("compact");
+  else panel.classList.remove("compact");
+  $("toggle-compact").textContent = compact ? "▾ Réglages" : "▴ Réduire";
+}
+
+function toggleCompact() {
+  const compact = !settings.getBool(storage, "compact", false);
+  settings.setBool(storage, "compact", compact);
+  applyCompact(compact);
+}
+
+/* ---------- Mises à jour (GitHub) ---------- */
+
+let availableUpdate = null;
+
+function showUpdate(update) {
+  availableUpdate = update;
+  if (!update) {
+    show($("update-banner"), false);
+    return;
   }
+  $("update-text").textContent = `⬆ Rotate ${update.version} est disponible (tu as la ${manifest.version}). Télécharge le pack, puis lance le script d'installation.`;
+  show($("update-banner"), true);
+}
+
+async function openUrl(url, why) {
+  try {
+    const error = await uxp.shell.openExternal(url, why);
+    if (error) log(`Impossible d'ouvrir le navigateur : ${error}`, "warn");
+  } catch (e) {
+    log(`Impossible d'ouvrir le navigateur : ${errorMessage(e)}`, "warn");
+  }
+}
+
+async function checkUpdates(force) {
+  const update = await updates.checkForUpdate({
+    fetch: (url, options) => fetch(url, options),
+    storage,
+    currentVersion: manifest.version,
+    force,
+  });
+  showUpdate(update);
+  if (force) {
+    if (update) log(`Nouvelle version disponible : ${update.version}`, "ok");
+    else log(`Rotate ${manifest.version} est à jour (ou GitHub est injoignable).`, "info");
+  }
+  return update;
 }
 
 /* ---------- Sens par défaut et options ---------- */
@@ -854,6 +903,15 @@ function initPanel() {
     signalEnd($("status"));
   });
   $("instagram").addEventListener("click", openInstagram);
+  $("toggle-compact").addEventListener("click", toggleCompact);
+  $("update-download").addEventListener("click", () => availableUpdate && openUrl(availableUpdate.downloadUrl, "Télécharger la nouvelle version de Rotate"));
+  $("update-page").addEventListener("click", () => availableUpdate && openUrl(availableUpdate.pageUrl, "Voir les nouveautés de Rotate"));
+  $("update-later").addEventListener("click", () => {
+    if (availableUpdate) updates.dismissUpdate(storage, availableUpdate.version);
+    showUpdate(null);
+  });
+  $("check-updates").addEventListener("click", () => checkUpdates(true));
+  $("opt-check-updates").addEventListener("change", (e) => settings.setBool(storage, "checkUpdates", e.target.checked));
   document.querySelectorAll("[data-shortcut]").forEach((button) => {
     button.addEventListener("click", () => {
       capturing = capturing === button.getAttribute("data-shortcut") ? null : button.getAttribute("data-shortcut");
@@ -869,6 +927,11 @@ function initPanel() {
   setChecked($("opt-preview"), settings.getBool(storage, "preview", true));
   setChecked($("opt-auto-proxy"), settings.getBool(storage, "autoProxy", false));
   setChecked($("opt-end-sound"), settings.getBool(storage, "endSound", true));
+  setChecked($("opt-check-updates"), settings.getBool(storage, "checkUpdates", true));
+  $("version-text").textContent = `Version installée : ${manifest.version}`;
+  applyCompact(settings.getBool(storage, "compact", false));
+  // Vérification en arrière-plan, sans jamais bloquer le panneau.
+  if (settings.getBool(storage, "checkUpdates", true)) checkUpdates(false).catch(() => {});
   renderShortcuts();
   renderDefault();
   renderPreset();

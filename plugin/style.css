@@ -57,7 +57,16 @@ body {
 .brand {
   display: flex;
   align-items: center;
-  margin: 0 0 4px -6px;
+  justify-content: space-between;
+  margin: 0 -6px 4px -6px;
+}
+
+/* Mode réduit : seulement le crédit, le bouton principal et l'état. */
+.panel.compact .scroll {
+  display: none;
+}
+.panel.compact .header {
+  border-bottom: none;
 }
 
 .header sp-button {
@@ -104,6 +113,7 @@ body {
   margin: 2px 0 0;
 }
 .status.proxy { border-left-color: var(--accent); }
+.status.update { border-left-color: var(--ok); }
 
 /* Barre de défilement toujours affichée : on voit qu'il y a des réglages en dessous. */
 .scroll {

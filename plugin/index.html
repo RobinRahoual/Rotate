@@ -19,6 +19,7 @@
             </div>
             @robin.rahoual sur Instagram
           </sp-action-button>
+          <sp-action-button id="toggle-compact" quiet>▴ Réduire</sp-action-button>
         </div>
         <sp-button id="rotate-default" variant="cta">Tourner en vertical</sp-button>
         <div id="status" class="status idle">
@@ -32,6 +33,14 @@
           <sp-progressbar id="progress-bar" class="hidden" max="100" value="0" size="small" show-value="false"></sp-progressbar>
           <sp-body size="XS" id="status-detail" class="muted">Sélectionne des rushs dans le panneau Projet.</sp-body>
           <sp-action-button id="status-log" quiet class="hidden">Voir le détail</sp-action-button>
+        </div>
+        <div id="update-banner" class="status update hidden">
+          <sp-body size="XS" id="update-text"></sp-body>
+          <div class="row">
+            <sp-action-button id="update-download">Télécharger</sp-action-button>
+            <sp-action-button id="update-page" quiet>Nouveautés</sp-action-button>
+            <sp-action-button id="update-later" quiet>Plus tard</sp-action-button>
+          </div>
         </div>
         <div id="proxy-banner" class="status proxy hidden">
           <sp-body size="XS" id="proxy-banner-text"></sp-body>
@@ -98,6 +107,13 @@
           <div class="field"><sp-checkbox id="opt-end-sound">Jouer un son à la fin</sp-checkbox></div>
           <sp-body size="XS" class="muted">Pour les opérations de plus de 8 s et quand les proxys sont prêts : le panneau passe au premier plan et le bilan clignote.</sp-body>
           <div class="row row-top"><sp-action-button id="test-signal" quiet>Tester le signal</sp-action-button></div>
+        </div>
+
+        <div class="section">
+          <sp-detail>MISES À JOUR</sp-detail>
+          <sp-body size="XS" class="muted" id="version-text"></sp-body>
+          <div class="field"><sp-checkbox id="opt-check-updates">Vérifier les mises à jour au démarrage</sp-checkbox></div>
+          <div class="row row-top"><sp-action-button id="check-updates">Vérifier maintenant</sp-action-button></div>
         </div>
 
         <div class="section">
