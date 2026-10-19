@@ -1,0 +1,3 @@
+*.bat text eol=crlf
+install/LISEZMOI.txt text eol=crlf
+*.command text eol=lf

@@ -1,0 +1,23 @@
+ROTATE - plugin Premiere Pro par @robin.rahoual (Instagram)
+
+INSTALLATION
+1. Double-clique sur le fichier Rotate-xxx.ccx.
+   L'application Creative Cloud s'ouvre et installe le plugin
+   (clique sur "Installer" a l'avertissement "plugin hors Marketplace").
+
+2. Si le double-clic ne fait rien :
+   - Windows : double-clique sur "Installer Rotate (Windows).bat"
+     (si Windows affiche "Windows a protege votre ordinateur" :
+      "Informations complementaires" puis "Executer quand meme").
+   - Mac : clic droit sur "Installer Rotate (Mac).command" > Ouvrir.
+   Laisse le fichier .ccx dans le meme dossier que le script.
+
+3. Redemarre Premiere Pro (25.6 ou plus recent), puis :
+   Fenetre > Plugins UXP > Rotate
+
+Avant d'installer, lance Premiere Pro au moins une fois et verifie que
+l'application Creative Cloud est ouverte et connectee a ton compte.
+
+MISE A JOUR
+Desinstalle l'ancienne version (Creative Cloud > Gerer les plugins),
+puis installe la nouvelle.

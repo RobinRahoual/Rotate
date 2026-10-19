@@ -33,6 +33,16 @@ vertical (ex. 2160×3840) dans le chutier, le moniteur source et les nouvelles s
    plugin ne vient pas de la Marketplace : clique sur *Installer*).
 3. Dans Premiere : *Fenêtre > Plugins UXP > Rotate*.
 
+**Le double-clic ne fait rien ?** C'est que l'extension `.ccx` n'est pas bien associée à Creative Cloud
+sur ton ordinateur. Télécharge plutôt `Rotate-<version>-installation.zip` (même page), décompresse-le, puis :
+- **Windows** : double-clique sur `Installer Rotate (Windows).bat` (si Windows affiche « Windows a protégé
+  votre ordinateur » : *Informations complémentaires* > *Exécuter quand même*) ;
+- **Mac** : clic droit sur `Installer Rotate (Mac).command` > *Ouvrir*.
+
+Le script lance l'installeur officiel d'Adobe (*Unified Plugin Installer Agent*) et affiche le message
+d'erreur exact en cas de problème. Avant d'installer, lance Premiere au moins une fois et vérifie que
+l'application Creative Cloud est ouverte et connectée.
+
 Le plugin reste installé après un redémarrage ou une mise à jour de Premiere. Pour le désinstaller :
 application Creative Cloud > *Gérer les plugins*. Si tu utilisais la version de développement, décharge-la
 d'abord dans UXP Developer Tool (sinon les deux se mélangent).

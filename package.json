@@ -1,6 +1,6 @@
 {
   "name": "rotate-premiere",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "Plugin Premiere Pro (UXP) : rotation verticale instantanée et sans perte des rushs MP4/MOV",
   "scripts": {
