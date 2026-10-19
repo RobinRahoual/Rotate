@@ -7,19 +7,30 @@
   <body>
     <div class="panel">
       <div class="header">
-        <sp-button id="rotate-default" variant="cta">Tourner en vertical</sp-button>
-        <div class="row header-row">
-          <sp-action-button id="undo" quiet disabled>Annuler la dernière opération</sp-action-button>
+        <!-- Crédit toujours visible, même quand le panneau est tout petit. -->
+        <div class="brand">
+          <sp-action-button id="instagram" quiet>
+            <div slot="icon" class="ig-icon">
+              <svg viewBox="0 0 24 24" width="14" height="14">
+              <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" ry="5.5" fill="none" stroke="currentColor" stroke-width="2"></rect>
+              <circle cx="12" cy="12" r="4.3" fill="none" stroke="currentColor" stroke-width="2"></circle>
+              <circle cx="17.6" cy="6.4" r="1.3" fill="currentColor"></circle>
+            </svg>
+            </div>
+            @robin.rahoual sur Instagram
+          </sp-action-button>
         </div>
+        <sp-button id="rotate-default" variant="cta">Tourner en vertical</sp-button>
         <div id="status" class="status idle">
           <div class="status-top">
             <span id="status-icon" class="status-icon"></span>
             <sp-body size="S" id="status-title" class="status-title">Prêt</sp-body>
+            <sp-action-button id="undo" quiet disabled>↶ Annuler</sp-action-button>
             <sp-action-button id="cancel" quiet class="hidden">Arrêter</sp-action-button>
             <sp-action-button id="status-close" quiet class="hidden">✕</sp-action-button>
           </div>
           <sp-progressbar id="progress-bar" class="hidden" max="100" value="0" size="small" show-value="false"></sp-progressbar>
-          <sp-body size="XS" id="status-detail" class="muted">Sélectionne des rushs ou des chutiers dans le panneau Projet.</sp-body>
+          <sp-body size="XS" id="status-detail" class="muted">Sélectionne des rushs dans le panneau Projet.</sp-body>
           <sp-action-button id="status-log" quiet class="hidden">Voir le détail</sp-action-button>
         </div>
         <div id="proxy-banner" class="status proxy hidden">
@@ -29,7 +40,7 @@
       </div>
 
       <div class="scroll">
-        <div class="section">
+        <div class="section first">
           <sp-detail>SENS PAR DÉFAUT</sp-detail>
           <sp-radio-group id="default-choice" column>
             <sp-radio value="270">↺ -90° (anti-horaire)</sp-radio>
@@ -98,19 +109,6 @@
         </div>
       </div>
 
-      <div class="footer">
-        <sp-body size="XS" class="muted credit">Rotate · plugin par @robin.rahoual sur Instagram</sp-body>
-        <sp-action-button id="instagram" quiet>
-          <div slot="icon" class="ig-icon">
-            <svg viewBox="0 0 24 24" width="14" height="14">
-              <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" ry="5.5" fill="none" stroke="currentColor" stroke-width="2"></rect>
-              <circle cx="12" cy="12" r="4.3" fill="none" stroke="currentColor" stroke-width="2"></circle>
-              <circle cx="17.6" cy="6.4" r="1.3" fill="currentColor"></circle>
-            </svg>
-          </div>
-          Instagram
-        </sp-action-button>
-      </div>
     </div>
     <video id="done-sound" class="sound" src="plugin:/assets/done.mp4" preload="auto"></video>
     <script src="main.js"></script>

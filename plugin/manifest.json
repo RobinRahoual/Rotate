@@ -1,7 +1,7 @@
 {
   "id": "fr.robinrahoual.rotate",
   "name": "Rotate",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "main": "index.html",
   "manifestVersion": 5,
   "host": {
@@ -28,16 +28,16 @@
         "default": "Rotate"
       },
       "minimumSize": {
-        "width": 180,
-        "height": 120
+        "width": 230,
+        "height": 220
       },
       "preferredDockedSize": {
-        "width": 260,
-        "height": 420
+        "width": 320,
+        "height": 640
       },
       "preferredFloatingSize": {
-        "width": 300,
-        "height": 480
+        "width": 360,
+        "height": 680
       }
     },
     {

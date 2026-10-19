@@ -49,8 +49,15 @@ body {
 
 .header {
   flex-shrink: 0;
-  padding: 8px 10px 6px;
+  padding: 2px 10px 6px;
   border-bottom: 1px solid var(--border);
+}
+
+/* Crédit en haut du panneau, toujours visible. */
+.brand {
+  display: flex;
+  align-items: center;
+  margin: 0 0 4px -6px;
 }
 
 .header sp-button {
@@ -61,7 +68,7 @@ body {
 
 .status {
   margin-top: 6px;
-  padding: 6px 8px;
+  padding: 4px 8px;
   border-left: 3px solid var(--border);
   background-color: var(--status-bg);
 }
@@ -98,9 +105,10 @@ body {
 }
 .status.proxy { border-left-color: var(--accent); }
 
+/* Barre de défilement toujours affichée : on voit qu'il y a des réglages en dessous. */
 .scroll {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: scroll;
   padding: 0 10px 10px;
 }
 
@@ -146,10 +154,6 @@ body {
 
 .muted {
   color: var(--text-muted);
-}
-
-.header-row {
-  margin: 4px 0 0;
 }
 
 /* Les cases à cocher restent en ligne dans leur propre conteneur : forcées en
@@ -232,19 +236,6 @@ body {
   opacity: 0;
 }
 
-/* ---------- Pied de panneau ---------- */
-
-.footer {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 2px 6px 2px 10px;
-  border-top: 1px solid var(--border);
-}
-.credit {
-  margin: 0;
-}
 .ig-icon {
   fill: currentColor;
   display: flex;

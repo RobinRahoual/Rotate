@@ -87,7 +87,7 @@ Les rotations sont *absolues* : recliquer sur le même bouton ne tourne pas une 
 
 ### Annuler la dernière opération
 
-Le bouton sous *Tourner en vertical* (ex. « Annuler : 12 rush(s) → ↺ -90° (14:32) ») remet les rushs de la
+Le bouton **↶ Annuler** de la ligne d'état (ex. « ↶ Annuler 12 rush(s) ») remet les rushs de la
 dernière opération exactement comme avant (à l'octet près). Les 10 dernières opérations sont
 mémorisées, même après avoir fermé Premiere : on peut cliquer plusieurs fois pour remonter. Un rush
 modifié entre-temps par une autre opération n'est pas touché.

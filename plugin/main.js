@@ -162,7 +162,7 @@ const status = (() => {
   }
 
   function reset() {
-    finish("idle", "Prêt", "Sélectionne des rushs ou des chutiers dans le panneau Projet.");
+    finish("idle", "Prêt", "Sélectionne des rushs dans le panneau Projet.");
   }
 
   return { start, phase, progress, finish, reset };
@@ -404,7 +404,10 @@ function renderUndo() {
   const last = settings.lastHistory(storage);
   const button = $("undo");
   setDisabled(button, busy || !last);
-  button.textContent = last ? `Annuler : ${describeOperation(last)}` : "Annuler la dernière opération";
+  // Libellé court (il tient sur la ligne d'état) ; le détail est dans la fenêtre de confirmation.
+  button.textContent = last ? `↶ Annuler ${last.files.length} rush(s)` : "↶ Annuler";
+  if (busy) button.classList.add("hidden");
+  else button.classList.remove("hidden");
 }
 
 async function undoLast(fromMenu) {
